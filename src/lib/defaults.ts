@@ -1,0 +1,92 @@
+import type { SimData, MaintItem } from '../types';
+
+export const DEFAULT_MAINT_ITEMS: MaintItem[] = [
+  { id: 'wall',    name: '🧱 外壁塗装',   cycleYears: 15, cost: 120, enabled: true },
+  { id: 'roof',    name: '🏠 屋根メンテ', cycleYears: 20, cost: 80,  enabled: true },
+  { id: 'termite', name: '🐜 防蟻処理',   cycleYears: 5,  cost: 15,  enabled: true },
+  { id: 'water',   name: '🚿 給湯器交換', cycleYears: 15, cost: 30,  enabled: true },
+  { id: 'kitchen', name: '🍳 キッチン交換', cycleYears: 20, cost: 150, enabled: true },
+  { id: 'bath',    name: '🛁 バス交換',   cycleYears: 25, cost: 120, enabled: true },
+  { id: 'toilet',  name: '🚽 トイレ交換', cycleYears: 20, cost: 25,  enabled: true },
+  { id: 'aircon',  name: '❄️ エアコン交換', cycleYears: 12, cost: 25, enabled: true },
+];
+
+// 月別発電量シェア係数（kW×1100kWh/年ベース）
+export const MFACTORS = [0.7726,0.903,1.0836,1.1639,1.2542,0.9732,1.0334,1.1839,0.9833,1.0234,0.8629,0.7625];
+
+const today = new Date().toISOString().slice(0, 10);
+
+export const DEFAULT_DATA: SimData = {
+  basic: {
+    customerName: '', staffName: '', date: today,
+    age: 33, income: 500, annualBonusInc: 0, incomeGrowth: 1.5, salaryAuto: true,
+    salaryManual: [400, 450, 500, 550, 600, 580, 380, 350],
+    retireAge: 65, retireBonus: 0,
+    spouseEnabled: true, spouseAge: 33, spouseIncome: 150, spouseAnnualBonusInc: 0,
+    spouseGrowth: 1.0, spouseRetireAge: 65, spouseRetireBonus: 0, salSpouseAuto: true,
+    spouseSalaryManual: [130, 140, 150, 160, 170, 160, 100, 100],
+    spouseLeaveEnabled: false,
+    spouseLeaveStartYear: 1,
+    spouseLeaveMonths: 15,
+    spouseMaternityMonths: 3,
+    spouseReturnIncomeRate: 100,
+    pensionStartAge: 65, savings: 500, spouseSavings: 0, kids: 1,
+    loanBorrowType: 'pair',
+    c1age: 3,  c1mid: '公立中学', c1high: '公立高校', c1uni: '国公立大学', c1alone: 4,
+    c2age: 0,  c2mid: '公立中学', c2high: '公立高校', c2uni: '国公立大学', c2alone: 4,
+    c3age: 0,  c3mid: '公立中学', c3high: '公立高校', c3uni: '国公立大学', c3alone: 4,
+    aloneMonthly: 7.7,
+    livingCostMonthly: 25, livingCostRetired: 20,
+  },
+  housing: {
+    land: 1000, building: 3000, fuka: 200, exterior: 200,
+    miscMode: 'pct', miscPct: 7,
+    down: 300, repRatio: 35, actualLoan: 0,
+    buildArea: 35, landArea: 60,
+    propTaxBuildingValue: null, propTaxLandValue: null, cityPlanningTaxEnabled: true,
+  },
+  loan: {
+    years: 35, loanType: 'var',
+    varRate1: 0.5, varPeriod1: 10,
+    varRate2: 1.5, varPeriod2: 20,
+    varRate3: 2.0,
+    fixRate1: 1.8, fixPeriod1: 10,
+    fixRate2: 2.0, fixPeriod2: 20,
+    fixRate3: 2.5,
+    bonusAmount: 0, bonusTimes: 2,
+    pyear: 5, pamount: 0, pyear2: 10, pamount2: 0,
+    ptype: '期間短縮',
+    taxHouseType: 'long_term', taxMoveInYear: 2026, taxLoanAmount: 0, taxPairMainShare: 50, taxSpecialHousehold: true,
+    isLongTermHouse: true,
+  },
+  solar: {
+    enabled: true,
+    battEnabled: false,
+    solarKw: 4.5, powerconKw: 4.5, solarCost: 135,
+    battCost: 0, battCapacity: 10,
+    fitRate: 16.0, fitRateAfter: 8.0, fitYears: 10,
+    elecPriceDay: 30, elecPriceNight: 26, dayUsageRatio: 40,
+    monthlyUsage: 400, elecBillManual: null,
+    genAuto: true, genM: [], genAnnualKwh: 0,
+    selfRateManual: false, selfRateSolar: 30, selfRateBatt: 70,
+    powerconCost: 25, powerconCycle: 15,
+    battReplaceCost: 100, battReplaceCycle: 15,
+    solarMaintCost: 5, solarMaintCycle: 10,
+  },
+  maint: { items: DEFAULT_MAINT_ITEMS },
+  household: {
+    food: 8, transport: 3, daily: 2, clothes: 1, hobby: 2, car: 2,
+    social: 1, medical: 1.5, other: 1,
+    otherLoan: 0, otherLoanBalance: 0,
+    ins1: 0, ins2: 0, ins3: 0, ins4: 0, ins5: 0, ins6: 0,
+    retFood: 6, retUtility: 2, retTransport: 2, retDaily: 1.5,
+    retClothes: 0.5, retHobby: 3, retCar: 1, retSocial: 1,
+    retMedical: 2, retOther: 1,
+    retIns1: 0, retIns2: 0, retIns3: 0, retIns4: 0,
+    electricMonthly: 0, gasMonthly: 0.8, waterMonthly: 0.3,
+    inflationRate: 0,
+  },
+  simYears: 30,
+  suddenExpenses: [],
+  savingsInsurances: [],
+};

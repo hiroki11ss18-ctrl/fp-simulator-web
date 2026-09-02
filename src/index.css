@@ -1,0 +1,196 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Noto Sans JP', system-ui, sans-serif;
+  color: #37352F;
+  background: #F7F6F3;
+}
+
+html, body, #root { height: 100%; }
+body { margin: 0; }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Scrollbar (Notion-like) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #D8D6CF; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #B9B7B0; }
+
+/* Print */
+@media print {
+  /* A4 縦向き — 幅210mm, 余白6mm → 内容幅 約198mm */
+  @page { size: A4 portrait; margin: 6mm; }
+  body { background: #fff !important; font-size: 9px; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+
+  /* シート印刷モード — A4縦に zoom で確実に縮小（改ページが正常に動く） */
+  .sheet-print-mode {
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    zoom: 0.65 !important;  /* 全体を 65% に縮小（読みやすさ重視） */
+    font-size: 11px;
+  }
+
+  /* 全要素 box-sizing + 最大幅 100% を強制 */
+  .sheet-print-mode * {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* テーブルが横にはみ出さないように */
+  .sheet-print-mode .overflow-x-auto,
+  .sheet-print-mode .overflow-auto,
+  .sheet-print-mode .overflow-x-scroll {
+    overflow: visible !important;
+  }
+  .sheet-print-mode table {
+    width: 100% !important;
+    table-layout: auto !important;
+    word-break: break-word !important;
+  }
+
+  /* truncate を解除して全文表示 */
+  .sheet-print-mode .truncate {
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+  }
+  .sheet-print-mode .whitespace-nowrap {
+    white-space: normal !important;
+  }
+
+  /* Tailwind の md:/lg: プレフィックスが印刷時にも効くよう明示指定 */
+  /* 2列 → そのまま2列維持（収入vs支出の左右並びなど） */
+  .sheet-print-mode .lg\:grid-cols-2,
+  .sheet-print-mode .md\:grid-cols-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* 3列レイアウト → 印刷時は1列にスタック（左右の偏り解消） */
+  /*   ・LCC の lg:col-span-2 + 右1/3 構成が左偏りになるため */
+  /*   ・基本情報の 共通設定+サマリー も同様 */
+  .sheet-print-mode .lg\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+  .sheet-print-mode .lg\:col-span-2,
+  .sheet-print-mode [class*="lg:col-span-2"],
+  .sheet-print-mode [class*="md:col-span-2"] {
+    grid-column: span 1 !important;
+  }
+  /* md:grid-cols-3 は 3カード横並び用なので3列維持（生涯収支など） */
+  .sheet-print-mode .md\:grid-cols-3 {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  /* 4列 → A4縦には広すぎるので 2列に集約 */
+  .sheet-print-mode .lg\:grid-cols-4,
+  .sheet-print-mode .md\:grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* 5列・6列 → 3列に集約 */
+  .sheet-print-mode .lg\:grid-cols-6,
+  .sheet-print-mode .md\:grid-cols-6 {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  /* 1列のまま (グリッド外の通常レイアウト) は維持 */
+
+  /* 色付き背景を確実に印刷 */
+  .sheet-print-mode * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* 全体の余白・gap を縮小（A4縦向き用に強めの縮小） */
+  .sheet-print-mode .gap-4 { gap: 0.3rem !important; }
+  .sheet-print-mode .gap-3 { gap: 0.2rem !important; }
+  .sheet-print-mode .gap-2 { gap: 0.15rem !important; }
+  .sheet-print-mode .p-6 { padding: 0.4rem !important; }
+  .sheet-print-mode .p-5 { padding: 0.35rem !important; }
+  .sheet-print-mode .p-4 { padding: 0.3rem !important; }
+  .sheet-print-mode .p-3 { padding: 0.2rem !important; }
+  .sheet-print-mode .px-5 { padding-left: 0.4rem !important; padding-right: 0.4rem !important; }
+  .sheet-print-mode .px-4 { padding-left: 0.3rem !important; padding-right: 0.3rem !important; }
+  .sheet-print-mode .py-3 { padding-top: 0.2rem !important; padding-bottom: 0.2rem !important; }
+  .sheet-print-mode .py-2 { padding-top: 0.15rem !important; padding-bottom: 0.15rem !important; }
+  .sheet-print-mode .pt-4 { padding-top: 0.3rem !important; }
+  .sheet-print-mode .pb-3 { padding-bottom: 0.2rem !important; }
+  .sheet-print-mode .mb-4 { margin-bottom: 0.4rem !important; }
+  .sheet-print-mode .mt-4 { margin-top: 0.4rem !important; }
+  .sheet-print-mode .mb-3 { margin-bottom: 0.25rem !important; }
+  .sheet-print-mode .mt-3 { margin-top: 0.25rem !important; }
+  .sheet-print-mode .space-y-4 > * + * { margin-top: 0.3rem !important; }
+  .sheet-print-mode .space-y-3 > * + * { margin-top: 0.25rem !important; }
+  .sheet-print-mode .space-y-2 > * + * { margin-top: 0.15rem !important; }
+  .sheet-print-mode .space-y-1 > * + * { margin-top: 0.08rem !important; }
+
+  /* 大きい数字をコンパクトに（縦向きに合わせさらに小さく） */
+  .sheet-print-mode .text-5xl { font-size: 20px !important; line-height: 1.1 !important; }
+  .sheet-print-mode .text-4xl { font-size: 17px !important; line-height: 1.1 !important; }
+  .sheet-print-mode .text-3xl { font-size: 14px !important; line-height: 1.1 !important; }
+  .sheet-print-mode .text-2xl { font-size: 12px !important; line-height: 1.1 !important; }
+  .sheet-print-mode .text-xl { font-size: 11px !important; line-height: 1.2 !important; }
+  .sheet-print-mode .text-lg { font-size: 10px !important; }
+  .sheet-print-mode .text-base { font-size: 9px !important; }
+  .sheet-print-mode .text-sm { font-size: 8px !important; }
+  .sheet-print-mode .text-xs { font-size: 7px !important; }
+  .sheet-print-mode .text-\[11px\] { font-size: 7px !important; }
+  .sheet-print-mode .text-\[10px\] { font-size: 6.5px !important; }
+  .sheet-print-mode table { font-size: 7px !important; }
+
+  /* テーブルのpadding削減 */
+  .sheet-print-mode td, .sheet-print-mode th {
+    padding: 0.1rem 0.2rem !important;
+  }
+
+  /* 角丸も少し詰める */
+  .sheet-print-mode .rounded-\[14px\] { border-radius: 4px !important; }
+  .sheet-print-mode .rounded-\[12px\] { border-radius: 4px !important; }
+  .sheet-print-mode .rounded-\[10px\] { border-radius: 3px !important; }
+  .sheet-print-mode .rounded-\[8px\] { border-radius: 3px !important; }
+
+  /* カードは可能な限りページをまたがない */
+  .sheet-print-mode section[class*="bg-bg-card"] {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .sheet-print-mode tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .sheet-print-mode thead { display: table-header-group; }
+
+  /* グラフをコンパクトに（A4縦向き用にさらに小さく） */
+  .sheet-print-mode .recharts-wrapper,
+  .sheet-print-mode .recharts-responsive-container {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    max-height: 130px !important;
+  }
+  .sheet-print-mode .h-72 { height: 130px !important; }
+  .sheet-print-mode .h-80 { height: 140px !important; }
+  .sheet-print-mode .h-64 { height: 120px !important; }
+  .sheet-print-mode .h-56 { height: 110px !important; }
+  .sheet-print-mode .h-48 { height: 100px !important; }
+
+  /* グラフのテキスト・ライン要素も小さく */
+  .sheet-print-mode .recharts-cartesian-axis-tick text {
+    font-size: 7px !important;
+  }
+  .sheet-print-mode .recharts-legend-item text {
+    font-size: 7px !important;
+  }
+
+  /* 入力欄を見やすく（編集できなくてOK） */
+  .sheet-print-mode input,
+  .sheet-print-mode select {
+    border: 1px solid #ccc !important;
+    background: #fff !important;
+    color: #000 !important;
+    padding: 1px 4px !important;
+  }
+}
+.print-only { display: none; }
