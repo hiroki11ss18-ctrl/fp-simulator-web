@@ -41,7 +41,7 @@ export const DEFAULT_DATA: SimData = {
   housing: {
     land: 1000, building: 3000, fuka: 200, exterior: 200,
     miscMode: 'pct', miscPct: 7,
-    down: 300, repRatio: 35, actualLoan: 0,
+    down: 300, repRatio: 35, reviewRate: 3, actualLoan: 0,
     buildArea: 35, landArea: 60,
     propTaxBuildingValue: null, propTaxLandValue: null, cityPlanningTaxEnabled: true,
   },

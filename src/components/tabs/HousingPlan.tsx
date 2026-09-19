@@ -22,7 +22,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
   const netLoan = Math.max(0, totalCost - h.down);
 
   // 審査基準（単独・ペアローン共通）
-  const REVIEW_RATE = 3.0;
+  const reviewRate = h.reviewRate ?? 3;
   const reviewRatio = h.repRatio;
   const ratioOptions = [...new Set([20, 25, 30, 35, 40, reviewRatio])]
     .sort((a, b) => a - b)
@@ -38,9 +38,9 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
   const otherLoanAnnual = hh.otherLoan * 12;
   const annualBudget = loanIncome * reviewRatio / 100;            // 全ローン枠
   const annualForHousing = Math.max(0, annualBudget - otherLoanAnnual); // 住宅ローン用
-  const maxLoan = calcMaxLoan(loanIncome, reviewRatio, REVIEW_RATE, l.years, hh.otherLoan);
+  const maxLoan = calcMaxLoan(loanIncome, reviewRatio, reviewRate, l.years, hh.otherLoan);
   // 他ローンがない場合の最大借入額（比較用）
-  const maxLoanNoOther = calcMaxLoan(loanIncome, reviewRatio, REVIEW_RATE, l.years, 0);
+  const maxLoanNoOther = calcMaxLoan(loanIncome, reviewRatio, reviewRate, l.years, 0);
   const reducedBy = Math.max(0, maxLoanNoOther - maxLoan);
 
   // 自動評価額（建物本体価格・土地代ベース）
@@ -160,7 +160,18 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
                 {fmtMan(maxLoan)} <span className="text-base font-normal text-ink-sub">万円</span>
               </div>
               <div className="text-[11px] text-ink-sub mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span>📐 審査金利 <span className="tabular font-semibold text-ink-main">3.0%</span></span>
+                <label className="inline-flex items-center gap-2">
+                  <span>審査金利</span>
+                  <NumInput
+                    value={reviewRate}
+                    onChange={v => set({ reviewRate: v })}
+                    step={0.1}
+                    min={0}
+                    max={100}
+                    suffix="%"
+                    className="w-32 tabular font-semibold"
+                  />
+                </label>
                 <label className="inline-flex items-center gap-2">
                   <span>返済比率</span>
                   <Select<number>

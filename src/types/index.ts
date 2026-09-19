@@ -62,6 +62,7 @@ export interface HousingPlan {
   miscPct: number;        // 諸費用率 %
   down: number;           // 頭金 万円
   repRatio: number;       // 返済比率 %
+  reviewRate: number;     // 最大借入額の試算に使う審査金利 %
   actualLoan: number;     // 実際の借入額（0=自動）
   // 固定資産税
   buildArea: number;                   // 建坪（坪）
