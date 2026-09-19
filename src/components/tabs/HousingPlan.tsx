@@ -1,4 +1,4 @@
-import { Card, Field, NumInput, Section } from '../ui';
+import { Card, Field, NumInput, Select, Section } from '../ui';
 import type { SimData, CalcResult } from '../../types';
 import {
   BUILDING_ASSESSMENT_RATIO,
@@ -21,9 +21,12 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
   const totalCost = h.land + h.building + h.fuka + h.exterior + miscAmt;
   const netLoan = Math.max(0, totalCost - h.down);
 
-  // 審査基準（単独・ペアローン共通: 審査金利 3.0% / 返済比率 35%）
+  // 審査基準（単独・ペアローン共通）
   const REVIEW_RATE = 3.0;
-  const REVIEW_RATIO = 35;
+  const reviewRatio = h.repRatio;
+  const ratioOptions = [...new Set([20, 25, 30, 35, 40, reviewRatio])]
+    .sort((a, b) => a - b)
+    .map(value => ({ value, label: `${value}%` }));
 
   // 世帯年収（参考表示用・ボーナス込み）
   const householdAnnual = b.income + b.annualBonusInc + (b.spouseEnabled ? b.spouseIncome + b.spouseAnnualBonusInc : 0);
@@ -33,11 +36,11 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
 
   // 他ローンの年返済（最大借入額からこの分を差し引く）
   const otherLoanAnnual = hh.otherLoan * 12;
-  const annualBudget = loanIncome * REVIEW_RATIO / 100;            // 全ローン枠
+  const annualBudget = loanIncome * reviewRatio / 100;            // 全ローン枠
   const annualForHousing = Math.max(0, annualBudget - otherLoanAnnual); // 住宅ローン用
-  const maxLoan = calcMaxLoan(loanIncome, REVIEW_RATIO, REVIEW_RATE, l.years, hh.otherLoan);
+  const maxLoan = calcMaxLoan(loanIncome, reviewRatio, REVIEW_RATE, l.years, hh.otherLoan);
   // 他ローンがない場合の最大借入額（比較用）
-  const maxLoanNoOther = calcMaxLoan(loanIncome, REVIEW_RATIO, REVIEW_RATE, l.years, 0);
+  const maxLoanNoOther = calcMaxLoan(loanIncome, reviewRatio, REVIEW_RATE, l.years, 0);
   const reducedBy = Math.max(0, maxLoanNoOther - maxLoan);
 
   // 自動評価額（建物本体価格・土地代ベース）
@@ -87,7 +90,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
               <Field label="💰 頭金（自己資金）"><NumInput value={h.down} onChange={v => set({ down: v })} suffix="万円" /></Field>
               <Field label="📅 返済期間"><NumInput value={l.years} onChange={v => setLoan({ years: v })} suffix="年" /></Field>
             </div>
-            <p className="text-xs text-ink-sub mt-3">※ 実借入額・返済比率の調整は「ローン計画」シートで行います。</p>
+            <p className="text-xs text-ink-sub mt-3">※ 実借入額の調整は「ローン計画」シートで行います。</p>
           </Card>
 
           <Card title="💳 住宅ローン以外の借入" accent="orange">
@@ -156,9 +159,17 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
               <div className="text-4xl font-bold tabular text-ink-main">
                 {fmtMan(maxLoan)} <span className="text-base font-normal text-ink-sub">万円</span>
               </div>
-              <div className="text-[11px] text-ink-sub mt-2 flex flex-wrap gap-x-3 gap-y-1">
+              <div className="text-[11px] text-ink-sub mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span>📐 審査金利 <span className="tabular font-semibold text-ink-main">3.0%</span></span>
-                <span>📊 返済比率 <span className="tabular font-semibold text-ink-main">35%</span></span>
+                <label className="inline-flex items-center gap-2">
+                  <span>返済比率</span>
+                  <Select<number>
+                    value={reviewRatio}
+                    onChange={v => set({ repRatio: v })}
+                    options={ratioOptions}
+                    className="!w-24 tabular font-semibold"
+                  />
+                </label>
                 <span>📅 返済期間 <span className="tabular font-semibold text-ink-main">{l.years}年</span></span>
               </div>
             </div>
@@ -166,7 +177,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
             {/* 他ローン控除の内訳 */}
             {hh.otherLoan > 0 && (
               <div className="mt-3 text-xs space-y-1 bg-bg-card border border-line-table rounded-[8px] p-3">
-                <div className="font-bold text-ink-sub mb-1.5">📋 返済負担率35%枠の内訳</div>
+                <div className="font-bold text-ink-sub mb-1.5">📋 返済負担率{reviewRatio}%枠の内訳</div>
                 <div className="flex justify-between">
                   <span className="text-ink-sub">全ローン年返済枠</span>
                   <span className="tabular text-ink-main">{fmt(annualBudget, 1)} 万円</span>
