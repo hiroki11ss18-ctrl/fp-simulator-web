@@ -1,4 +1,8 @@
 /** 数値→「1,234」 */
+export function localISODate() {
+  const d = new Date();
+  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+}
 export function fmt(n: number, digits = 0): string {
   if (!isFinite(n)) return '-';
   return n.toLocaleString('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits });

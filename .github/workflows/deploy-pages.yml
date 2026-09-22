@@ -36,6 +36,9 @@ jobs:
       - name: Build public simulator
         run: npm run build
 
+      - name: Verify financial calculations
+        run: npm test
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 

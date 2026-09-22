@@ -38,6 +38,11 @@ export interface BasicInfo {
   spouseReturnIncomeRate: number;  // 復帰後の収入率 %
   // 共通
   pensionStartAge: number;
+  takeHomePct: number;
+  spouseTakeHomePct: number;
+  pensionMonthly: number | null;
+  spousePensionMonthly: number | null;
+  emergencyFundMonths: number;
   savings: number;          // 現在の貯蓄額（世帯主） 万円
   spouseSavings: number;    // 現在の貯蓄額（配偶者） 万円
   kids: number;             // 子どもの人数（0〜4）
@@ -99,11 +104,22 @@ export interface LoanPlan {
   taxSpecialHousehold: boolean; // 子育て・若者夫婦世帯の上乗せ対象か
   // 長期優良住宅フラグ
   isLongTermHouse: boolean;
+  taxInclude: boolean;
+  taxAnnualCap: number;
+  taxSpouseAnnualCap: number;
 }
 
 // ─── 太陽光・蓄電池 ───
 export interface SolarBattery {
   enabled: boolean;        // 太陽光 導入ON/OFF
+  funding: 'included' | 'cash' | 'loan';
+  generationYield: number;
+  degradationPct: number;
+  batteryEfficiencyPct: number;
+  baseChargeMonthly: number;
+  panelLifeYears: number;
+  panelReplace: boolean;
+  panelReplaceCost: number;
   battEnabled: boolean;    // 蓄電池 導入ON/OFF（太陽光ONが前提）
   solarKw: number;         // パネル容量 kW
   powerconKw: number;      // パワコン容量 kW
@@ -111,6 +127,8 @@ export interface SolarBattery {
   battCost: number;        // 蓄電池費用 万円
   battCapacity: number;    // 蓄電池容量 kWh
   fitRate: number;         // FIT売電単価 円/kWh
+  fitStepYears: number;
+  fitRateMiddle: number;
   fitRateAfter: number;    // FIT後単価
   fitYears: number;        // FIT期間
   elecPriceDay: number;    // 昼間買電単価 円/kWh
@@ -153,6 +171,8 @@ export interface HouseholdExpenses {
   social: number; medical: number; other: number;
   otherLoan: number;   // 住宅以外のローン月返済
   otherLoanBalance: number;
+  otherLoanRate: number;
+  otherLoanMonths: number;
   // 保険 月額（6項目）
   ins1: number; ins2: number; ins3: number; ins4: number; ins5: number; ins6: number;
   // 退職後 月額 万円
@@ -171,6 +191,9 @@ export interface SuddenExpense {
   name: string;
   amount: number;      // 万円
   cycleYears: number;  // 何年ごとに発生するか（周期）。0 なら無効
+  firstYear?: number;
+  endYear?: number;
+  once?: boolean;
 }
 
 // ─── 貯蓄型保険（学資・養老・個人年金など） ───
@@ -193,6 +216,9 @@ export interface SimData {
   simYears: SimYears;
   suddenExpenses: SuddenExpense[];
   savingsInsurances: SavingsInsurance[];
+  educationCosts: Record<string, number>;
+  stress: { rateAdd: number; incomeDropPct: number; expenseAddPct: number };
+  reviewChecks: { income: boolean; expenses: boolean; housing: boolean; education: boolean; energy: boolean };
 }
 
 // ─── 計算結果 ───
@@ -207,7 +233,7 @@ export interface YearRow {
   propTax: number;
   eduCost: number;
   maintCost: number;
-  solarBenefit: number;
+  solarBenefit: number; // 売電収入。節電はutilityを減額して計上
   leaveIncomeLoss: number; // 産休・育休による収入減
   sudden: number;     // 急な出費（年間合計）
   taxBack: number;    // 住宅ローン控除（年額）
@@ -217,10 +243,25 @@ export interface YearRow {
   status: 'great' | 'normal' | 'caution' | 'danger' | 'big';
   events: string[];
   loanBalance: number;
+  wage: number;
+  pension: number;
+  insurancePayout: number;
+  insurancePremium: number;
+  otherLoanPay: number;
+  otherLoanBalance: number;
+  solarSaving: number;
+  solarSale: number;
+  prepaid: number;
+  totalOut: number;
 }
 
 export interface CalcResult {
   rows: YearRow[];
+  initialSavings: number;
+  initialCash: number;
+  cashRequired: number;
+  solarInitial: number;
+  warnings: string[];
   loan: number;         // 実借入額 万円
   loanAuto: number;     // 自動借入額
   miscAmt: number;      // 諸費用額

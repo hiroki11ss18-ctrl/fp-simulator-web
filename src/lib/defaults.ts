@@ -1,4 +1,5 @@
 import type { SimData, MaintItem } from '../types';
+import { localISODate } from './format';
 
 export const DEFAULT_MAINT_ITEMS: MaintItem[] = [
   { id: 'wall',    name: '🧱 外壁塗装',   cycleYears: 15, cost: 120, enabled: true },
@@ -14,7 +15,7 @@ export const DEFAULT_MAINT_ITEMS: MaintItem[] = [
 // 月別発電量シェア係数（kW×1100kWh/年ベース）
 export const MFACTORS = [0.7726,0.903,1.0836,1.1639,1.2542,0.9732,1.0334,1.1839,0.9833,1.0234,0.8629,0.7625];
 
-const today = new Date().toISOString().slice(0, 10);
+const today = localISODate();
 
 export const DEFAULT_DATA: SimData = {
   basic: {
@@ -31,6 +32,8 @@ export const DEFAULT_DATA: SimData = {
     spouseMaternityMonths: 3,
     spouseReturnIncomeRate: 100,
     pensionStartAge: 65, savings: 500, spouseSavings: 0, kids: 1,
+    takeHomePct: 80, spouseTakeHomePct: 80,
+    pensionMonthly: null, spousePensionMonthly: null, emergencyFundMonths: 6,
     loanBorrowType: 'pair',
     c1age: 3,  c1mid: '公立中学', c1high: '公立高校', c1uni: '国公立大学', c1alone: 4,
     c2age: 0,  c2mid: '公立中学', c2high: '公立高校', c2uni: '国公立大学', c2alone: 4,
@@ -58,13 +61,17 @@ export const DEFAULT_DATA: SimData = {
     ptype: '期間短縮',
     taxHouseType: 'long_term', taxMoveInYear: 2026, taxLoanAmount: 0, taxPairMainShare: 50, taxSpecialHousehold: true,
     isLongTermHouse: true,
+    taxInclude: false, taxAnnualCap: 0, taxSpouseAnnualCap: 0,
   },
   solar: {
     enabled: true,
+    funding: 'included', generationYield: 1000, degradationPct: 0.5,
+    batteryEfficiencyPct: 90, baseChargeMonthly: 0,
+    panelLifeYears: 30, panelReplace: true, panelReplaceCost: 135,
     battEnabled: false,
     solarKw: 4.5, powerconKw: 4.5, solarCost: 135,
     battCost: 0, battCapacity: 10,
-    fitRate: 16.0, fitRateAfter: 8.0, fitYears: 10,
+    fitRate: 24, fitStepYears: 4, fitRateMiddle: 8.3, fitRateAfter: 8.0, fitYears: 10,
     elecPriceDay: 30, elecPriceNight: 26, dayUsageRatio: 40,
     monthlyUsage: 400, elecBillManual: null,
     genAuto: true, genM: [], genAnnualKwh: 0,
@@ -78,6 +85,7 @@ export const DEFAULT_DATA: SimData = {
     food: 8, transport: 3, daily: 2, clothes: 1, hobby: 2, car: 2,
     social: 1, medical: 1.5, other: 1,
     otherLoan: 0, otherLoanBalance: 0,
+    otherLoanRate: 0, otherLoanMonths: 0,
     ins1: 0, ins2: 0, ins3: 0, ins4: 0, ins5: 0, ins6: 0,
     retFood: 6, retUtility: 2, retTransport: 2, retDaily: 1.5,
     retClothes: 0.5, retHobby: 3, retCar: 1, retSocial: 1,
@@ -89,4 +97,13 @@ export const DEFAULT_DATA: SimData = {
   simYears: 30,
   suddenExpenses: [],
   savingsInsurances: [],
+  educationCosts: {
+    '未就学': 18.4646, '公立小学校': 36.6599,
+    '公立中学': 54.245, '私立中学': 156.0359,
+    '公立高校': 59.6954, '私立高校': 117.9261,
+    '国公立大学': 60.7, '私立文系': 93.5, '私立理系': 129.3,
+    '専門学校(2年)': 100, '専門学校(3年)': 90, '就職': 0,
+  },
+  stress: { rateAdd: 1, incomeDropPct: 10, expenseAddPct: 10 },
+  reviewChecks: { income: false, expenses: false, housing: false, education: false, energy: false },
 };

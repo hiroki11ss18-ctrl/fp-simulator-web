@@ -1,141 +1,45 @@
-import { Card, NumInput, StatBox } from '../ui';
-import type { SimData, MaintItem } from '../../types';
-import { fmtMan } from '../../lib/format';
+import { Plus, Trash2 } from 'lucide-react';
+import { Field, NumInput, TextInput } from '../ui';
+import type { SimData, MaintItem, CalcResult } from '../../types';
+import { fmt } from '../../lib/format';
+import { solarMaintenance } from '../../lib/energy';
 
-// 太陽光関連の固定項目（編集は太陽光タブ側）
-type LinkedItem = { id: string; name: string; cycleYears: number; cost: number; note: string };
-
-export default function Maintenance({ data, update }: { data: SimData; update: (p: Partial<SimData>) => void }) {
+export default function Maintenance({ data, update, calc }: { data: SimData; update: (p: Partial<SimData>) => void; calc: CalcResult }) {
   const items = data.maint.items;
-  const s = data.solar;
-  const set = (its: MaintItem[]) => update({ maint: { items: its } });
-  const upd = (id: string, patch: Partial<MaintItem>) => set(items.map(i => i.id === id ? { ...i, ...patch } : i));
-
-  // 太陽光連動の3項目
-  const linked: LinkedItem[] = s.enabled ? [
-    { id: 'powercon', name: '🔧 パワコン交換', cycleYears: s.powerconCycle, cost: s.powerconCost, note: '🔗 太陽光タブ' },
-    { id: 'solarchk', name: '☀️ 太陽光点検・清掃', cycleYears: s.solarMaintCycle, cost: s.solarMaintCost, note: '🔗 太陽光タブ' },
-    ...(s.battEnabled ? [{ id: 'battery', name: '🔋 蓄電池交換', cycleYears: s.battReplaceCycle, cost: s.battReplaceCost, note: '🔗 太陽光タブ' }] : []),
-  ] : [];
-
-  // 期間（30年・60年）合計
-  const calcSum = (years: number) => {
-    let total = 0;
-    for (const it of items) {
-      if (!it.enabled || it.cycleYears <= 0) continue;
-      for (let y = it.cycleYears; y <= years; y += it.cycleYears) total += it.cost;
-    }
-    for (const it of linked) {
-      if (it.cycleYears <= 0) continue;
-      for (let y = it.cycleYears; y <= years; y += it.cycleYears) total += it.cost;
-    }
-    return total;
-  };
-
-  const period = data.simYears;
-  const totalInPeriod = calcSum(period);
-  const yearAvg = period > 0 ? totalInPeriod / period : 0;
-  const monthAvg = yearAvg / 12;
-
-  // タイムライン（5年刻みでイベント集計）
-  type Event = { year: number; name: string; cost: number };
-  const events: Event[] = [];
-  for (const it of items) {
-    if (!it.enabled || it.cycleYears <= 0) continue;
-    for (let y = it.cycleYears; y <= period; y += it.cycleYears) events.push({ year: y, name: it.name, cost: it.cost });
-  }
-  for (const it of linked) {
-    if (it.cycleYears <= 0) continue;
-    for (let y = it.cycleYears; y <= period; y += it.cycleYears) events.push({ year: y, name: it.name, cost: it.cost });
-  }
-  events.sort((a, b) => a.year - b.year);
-  // 5年単位にグルーピング
-  const buckets: { range: string; from: number; to: number; events: Event[]; total: number }[] = [];
-  for (let from = 1; from <= period; from += 5) {
-    const to = Math.min(from + 4, period);
-    const evs = events.filter(e => e.year >= from && e.year <= to);
-    if (evs.length === 0) continue;
-    buckets.push({ range: `${from}〜${to}年目`, from, to, events: evs, total: evs.reduce((a, e) => a + e.cost, 0) });
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatBox label={`${period}年メンテ総額`} value={fmtMan(totalInPeriod)} tone="bad" />
-        <StatBox label="年平均" value={fmtMan(yearAvg)} tone="normal" />
-        <StatBox label="月平均" value={fmtMan(monthAvg)} suffix="万円/月" tone="normal" />
-        <StatBox label="60年総額（参考）" value={fmtMan(calcSum(60))} tone="normal" />
+  const set = (values: MaintItem[]) => update({ maint: { items: values } });
+  const patch = (id: string, values: Partial<MaintItem>) => set(items.map(i => i.id === id ? { ...i, ...values } : i));
+  const total = calc.rows.slice(0, data.simYears).reduce((a, r) => a + r.maintCost, 0);
+  const allTotal = calc.rows.reduce((a, r) => a + r.maintCost, 0);
+  const solarTotal = calc.rows.slice(0, data.simYears).reduce((a, r) => a + solarMaintenance(data.solar, r.year) * (1 + data.household.inflationRate / 100) ** (r.year - 1), 0);
+  return <div className="plan-layout">
+    <section className="plan-section">
+      <h2>住まいを維持するための予算</h2>
+      <div className="metric-grid">
+        <div className="metric"><span>{data.simYears}年間の修繕・設備更新</span><strong>{fmt(total)}<small>万円</small></strong></div>
+        <div className="metric"><span>月々の積立目安</span><strong>{fmt(total / data.simYears / 12, 2)}<small>万円/月</small></strong></div>
+        <div className="metric"><span>うち太陽光・蓄電池</span><strong>{fmt(solarTotal)}<small>万円</small></strong></div>
+        <div className="metric"><span>60年間の総額</span><strong>{fmt(allTotal)}<small>万円</small></strong></div>
       </div>
-
-      <Card title="🔧 メンテナンス項目">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-ink-label border-b border-line-table">
-                <th className="py-2 pr-2 w-10">有効</th>
-                <th className="py-2 pr-2">項目</th>
-                <th className="py-2 pr-2 text-right">実施目安（年ごと）</th>
-                <th className="py-2 pr-2 text-right">概算費用（万円）</th>
-                <th className="py-2 pr-2">備考</th>
-                <th className="py-2 pr-2 text-right">{period}年間合計</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(it => {
-                const cnt = it.enabled && it.cycleYears > 0 ? Math.floor(period / it.cycleYears) : 0;
-                return (
-                  <tr key={it.id} className="border-b border-line-table hover:bg-bg-panel/40">
-                    <td className="py-2 pr-2">
-                      <input type="checkbox" checked={it.enabled} onChange={e => upd(it.id, { enabled: e.target.checked })} />
-                    </td>
-                    <td className="py-2 pr-2 font-medium text-ink-main">{it.name}</td>
-                    <td className="py-2 pr-2 w-32"><NumInput value={it.cycleYears} onChange={v => upd(it.id, { cycleYears: v })} suffix="年" /></td>
-                    <td className="py-2 pr-2 w-32"><NumInput value={it.cost} onChange={v => upd(it.id, { cost: v })} suffix="万" /></td>
-                    <td className="py-2 pr-2 text-xs text-ink-sub">{cnt > 0 ? `${cnt}回実施` : '—'}</td>
-                    <td className="py-2 pr-2 text-right tabular font-medium">{cnt > 0 ? `${fmtMan(cnt * it.cost)} 万円` : '—'}</td>
-                  </tr>
-                );
-              })}
-              {linked.map(it => {
-                const cnt = it.cycleYears > 0 ? Math.floor(period / it.cycleYears) : 0;
-                return (
-                  <tr key={it.id} className="border-b border-line-table bg-bg-panel/20">
-                    <td className="py-2 pr-2 text-center">🔗</td>
-                    <td className="py-2 pr-2 font-medium text-ink-main">{it.name}</td>
-                    <td className="py-2 pr-2 text-right text-ink-sub tabular">{it.cycleYears} 年</td>
-                    <td className="py-2 pr-2 text-right text-ink-sub tabular">{fmtMan(it.cost)} 万</td>
-                    <td className="py-2 pr-2 text-xs text-ink-sub">{it.note}</td>
-                    <td className="py-2 pr-2 text-right tabular font-medium">{cnt > 0 ? `${fmtMan(cnt * it.cost)} 万円` : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-xs text-ink-sub mt-3">※ 🔗マーク（パワコン・太陽光点検・蓄電池）は「太陽光・蓄電池」シートで設定し、ここに自動反映されます。</p>
-      </Card>
-
-      <Card title="📅 メンテナンス タイムライン（5年刻み）">
-        {buckets.length === 0 && <div className="text-sm text-ink-sub">期間中のメンテ予定はありません。</div>}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {buckets.map(b => (
-            <div key={b.range} className="bg-bg-panel rounded-[8px] p-4">
-              <div className="flex justify-between items-baseline mb-2">
-                <div className="text-xs font-bold text-ink-label">{b.range}</div>
-                <div className="tabular font-bold text-ink-main">{fmtMan(b.total)} <span className="text-xs font-normal text-ink-sub">万円</span></div>
-              </div>
-              <ul className="space-y-1 text-xs">
-                {b.events.map((e, i) => (
-                  <li key={i} className="flex justify-between">
-                    <span className="text-ink-main">{e.year}年目: {e.name}</span>
-                    <span className="tabular text-ink-sub">{fmtMan(e.cost)}万</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
+      <p className="plan-note">実際に支払う年の支出を合算。物価上昇率 {data.household.inflationRate}%/年を反映しています。30年目・60年目の支出も含め、総合まとめと同じ計算です。積立目安を残高から二重に引くことはありません。</p>
+    </section>
+    <section className="plan-section">
+      <div className="section-heading"><h2>建物・設備のメンテナンス</h2><button className="action-button" onClick={() => set([...items, { id: crypto.randomUUID(), name: '', cycleYears: 10, cost: 0, enabled: true }])}><Plus size={16} />項目を追加</button></div>
+      {items.map(item => <div className="maintenance-row" key={item.id}>
+        <label className="check-cell"><input aria-label={item.name + 'を計上'} type="checkbox" checked={item.enabled} onChange={e => patch(item.id, { enabled: e.target.checked })} />計上</label>
+        <Field label="項目"><TextInput value={item.name} onChange={name => patch(item.id, { name })} /></Field>
+        <Field label="実施間隔（0はなし）"><NumInput value={item.cycleYears} onChange={cycleYears => patch(item.id, { cycleYears: Math.round(cycleYears) })} step={1} max={60} suffix="年" /></Field>
+        <Field label="1回の費用（現在価格）"><NumInput value={item.cost} onChange={cost => patch(item.id, { cost })} step={1} suffix="万円" /></Field>
+        <button className="icon-button danger" title="メンテナンス項目を削除" onClick={() => set(items.filter(i => i.id !== item.id))}><Trash2 size={17} /></button>
+      </div>)}
+      <p className="plan-note">費用・周期は仮予算です。メーカー仕様・保証条件・地域の施工見積で確認してください。太陽光・パワコン・蓄電池の交換費は太陽光・蓄電池の設定から別途連動するため、ここに重ねて入力しないでください。</p>
+    </section>
+    <section className="plan-section">
+      <h2>修繕・更新の予定年</h2>
+      <div className="table-scroll"><table className="plan-table"><thead><tr><th>経過年</th><th>世帯主年齢</th><th>予定</th><th>その年の支出</th></tr></thead><tbody>
+        {calc.rows.slice(0, data.simYears).filter(r => r.maintCost > 0).map(r => <tr key={r.year}>
+          <th>{r.year}年後</th><td>{r.age}歳</td><td>{items.filter(i => i.enabled && i.cycleYears > 0 && r.year % Math.max(1, Math.round(i.cycleYears)) === 0).map(i => i.name).concat(solarMaintenance(data.solar, r.year) > 0 ? ['太陽光設備の点検・更新'] : []).join(' / ')}</td><td>{fmt(r.maintCost, 1)}万円</td>
+        </tr>)}
+      </tbody></table></div>
+    </section>
+  </div>;
 }

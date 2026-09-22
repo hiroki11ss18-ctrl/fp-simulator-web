@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from './ui';
+import { Plus, Save, Printer, FileText, RotateCcw } from 'lucide-react';
 import type { SimYears } from '../types';
 import type { CustomerRow } from '../hooks/useCustomer';
 
@@ -9,7 +10,7 @@ export const TABS = [
   { id: 'loan', label: 'ローン計画' },
   { id: 'solar', label: '太陽光・蓄電池' },
   { id: 'maint', label: 'メンテナンス' },
-  { id: 'lcc', label: 'LCC' },
+  { id: 'lcc', label: '家計・教育費' },
   { id: 'summary', label: '総合まとめ' },
 ] as const;
 export type TabId = (typeof TABS)[number]['id'];
@@ -34,7 +35,7 @@ interface Props {
 export default function Header(p: Props) {
   return (
     <header className="sticky top-0 z-30 bg-bg-page/95 backdrop-blur border-b border-line-card no-print">
-      <div className="max-w-[1400px] mx-auto px-6 pt-3 pb-0 flex items-center gap-4">
+      <div className="max-w-[1400px] mx-auto px-3 sm:px-6 pt-3 pb-0 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 shrink-0">
           <div className="w-7 h-7 bg-accent-blue rounded-[6px] flex items-center justify-center text-white text-sm font-bold">FP</div>
           <div className="leading-tight">
@@ -45,7 +46,7 @@ export default function Header(p: Props) {
 
         <div className="flex-1" />
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 header-actions">
           <div className="bg-bg-panel rounded-[8px] p-1 flex">
             {([30, 40, 50, 60] as SimYears[]).map(y => (
               <button
@@ -63,11 +64,11 @@ export default function Header(p: Props) {
             onRemove={p.onRemoveCustomer}
           />
 
-          <Button onClick={p.onNew} title="新規顧客">＋ 新規</Button>
-          <Button variant="primary" onClick={p.onSave} title="保存">💾 保存</Button>
-          <Button onClick={p.onPrintSheet} title="今表示中のシートを印刷">📄 シート印刷</Button>
-          <Button onClick={p.onPrint} title="お客様お渡し用の提案書を印刷（A4・2ページ構成）">🖨 提案書</Button>
-          <Button variant="ghost" onClick={p.onReset} title="入力リセット">🔄</Button>
+          <Button onClick={p.onNew} title="新規顧客"><Plus size={16} />新規</Button>
+          <Button variant="primary" onClick={p.onSave} title="保存"><Save size={16} />保存</Button>
+          <Button onClick={p.onPrintSheet} title="今表示中のシートを印刷"><FileText size={16} />シート印刷</Button>
+          <Button onClick={p.onPrint} title="お客様用の提案書を印刷・PDF保存"><Printer size={16} />提案書</Button>
+          <Button variant="ghost" onClick={p.onReset} title="入力リセット"><RotateCcw size={16} /></Button>
         </div>
       </div>
 

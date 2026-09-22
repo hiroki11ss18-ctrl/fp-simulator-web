@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+
+const FieldId = createContext<string | undefined>(undefined);
 
 // 文字列の先頭にある絵文字・装飾記号を取り除く（"絵文字＋空白" が連続する限り除去）
 const LEADING_DECOR_RE = /^(?:\p{Extended_Pictographic}|️|‍|[☀-➿])+\s*/u;
@@ -36,20 +38,23 @@ export function Card({ title, children, className = '', right, accent = 'blue' }
 
 export function Field({ label, hint, children, className = '' }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
   const cleanLabel = stripLeadingDecor(label);
+  const id = useId();
   return (
-    <label className={`block ${className}`}>
-      <div className="text-[11px] tracking-wider text-ink-label font-semibold mb-1.5 uppercase">{cleanLabel}</div>
-      {children}
+    <div className={`block ${className}`}>
+      <label htmlFor={id} className="block text-[11px] text-ink-label font-semibold mb-1.5">{cleanLabel}</label>
+      <FieldId.Provider value={id}>{React.Children.map(children, child => React.isValidElement(child) && (child.type === 'input' || child.type === 'select') ? React.cloneElement(child as React.ReactElement<{ id?: string }>, { id }) : child)}</FieldId.Provider>
       {hint && <div className="text-[11px] text-ink-sub mt-1.5">{hint}</div>}
-    </label>
+    </div>
   );
 }
 
 export function NumInput({
   value, onChange, step = 10, min = 0, max, suffix, className = '', placeholder = '0',
 }: { value: number; onChange: (n: number) => void; step?: number; min?: number; max?: number; suffix?: string; className?: string; placeholder?: string }) {
-  // value === 0 のときは空欄表示にして、ユーザがすぐ数値を入力できるようにする
-  const display = !Number.isFinite(value) || value === 0 ? '' : value;
+  const id = useContext(FieldId);
+  const [display, setDisplay] = useState(String(Number.isFinite(value) ? value : min));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setDisplay(String(Number.isFinite(value) ? value : min)); }, [value, min]);
   // 入力値を min/max の範囲に丸める（負値・上限超え禁止）
   const clamp = (n: number): number => {
     if (!Number.isFinite(n)) return min;
@@ -61,27 +66,33 @@ export function NumInput({
   return (
     <div className={`flex items-center bg-bg-card border border-line-card rounded-[8px] focus-within:border-accent-blue ${className}`}>
       <input
+        id={id}
         type="number"
-        className="w-full px-3 py-2 bg-transparent outline-none tabular text-right text-ink-main placeholder:text-ink-sub/50"
+        inputMode="decimal"
+        className="w-full min-w-0 px-3 py-2 bg-transparent outline-none tabular text-right text-ink-main placeholder:text-ink-sub/50"
         value={display}
         placeholder={placeholder}
         step={step}
         min={min}
         max={max}
-        onChange={e => onChange(e.target.value === '' ? min : clamp(Number(e.target.value)))}
+        onFocus={() => { focused.current = true; }}
+        onChange={e => { setDisplay(e.target.value); onChange(e.target.value === '' ? min : clamp(Number(e.target.value))); }}
+        onBlur={() => { focused.current = false; setDisplay(String(clamp(value))); }}
         onKeyDown={e => {
           // マイナス記号・指数表記の文字を抑制
-          if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault();
+          if ((e.key === '-' && min >= 0) || e.key === 'e' || e.key === 'E') e.preventDefault();
         }}
       />
-      {suffix && <span className="px-3 text-ink-sub text-sm select-none">{suffix}</span>}
+      {suffix && <span className="px-2 text-ink-sub text-xs select-none whitespace-nowrap shrink-0">{suffix}</span>}
     </div>
   );
 }
 
 export function TextInput({ value, onChange, placeholder, className = '' }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
+  const id = useContext(FieldId);
   return (
     <input
+      id={id}
       type="text"
       placeholder={placeholder}
       value={value}
@@ -92,8 +103,10 @@ export function TextInput({ value, onChange, placeholder, className = '' }: { va
 }
 
 export function Select<T extends string | number>({ value, onChange, options, className = '' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; className?: string }) {
+  const id = useContext(FieldId);
   return (
     <select
+      id={id}
       value={value as any}
       onChange={e => {
         const raw = e.target.value;
@@ -110,12 +123,12 @@ export function Select<T extends string | number>({ value, onChange, options, cl
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
     <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-      <span
+      <button type="button" role="switch" aria-checked={checked} aria-label={label}
         onClick={() => onChange(!checked)}
         className={`w-9 h-5 rounded-full relative transition-colors ${checked ? 'bg-accent-blue' : 'bg-line-card'}`}
       >
         <span className={`absolute top-0.5 ${checked ? 'left-[18px]' : 'left-0.5'} w-4 h-4 bg-white rounded-full shadow transition-all`} />
-      </span>
+      </button>
       {label && <span className="text-sm text-ink-main">{label}</span>}
     </label>
   );

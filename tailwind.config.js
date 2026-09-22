@@ -5,18 +5,18 @@ export default {
     extend: {
       colors: {
         bg: {
-          page: '#F7F6F3',
+          page: '#F4F6F7',
           card: '#FFFFFF',
-          panel: '#EFEDE9',
+          panel: '#EEF2F4',
         },
         ink: {
-          main: '#37352F',
-          sub: '#787774',
-          label: '#9B9B97',
+          main: '#29333A',
+          sub: '#65747C',
+          label: '#65747C',
         },
         line: {
-          card: '#E9E8E3',
-          table: '#F1F0EC',
+          card: '#DCE2E6',
+          table: '#E6EBEE',
         },
         accent: {
           blue: '#2D7DD2',

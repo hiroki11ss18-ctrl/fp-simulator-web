@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
 import type { SimData, CalcResult, YearRow, LoanPlan, HouseType } from '../types';
-import { MFACTORS } from '../lib/defaults';
+import { DEFAULT_DATA } from '../lib/defaults';
+import { energyYear, solarInitialCost, solarMaintenance, clamp } from '../lib/energy';
+import { calcEdu, eduAnnualByAge, childrenOf, childEducation } from '../lib/education';
+import { occursInYear } from '../lib/suddenExpenses';
+import { loanSchedule } from '../lib/loans';
+export { solarMonthlyGenArr } from '../lib/energy';
 
 // ─── 月返済額（元利均等）───
 export function calcMonthly(principal: number, rate: number, years: number): number {
@@ -24,11 +29,13 @@ export function getBalance(principal: number, rate: number, years: number, month
 // 子育て・若者夫婦世帯は性能区分ごとに上乗せがある。
 export function getTaxBorrowLimit(houseType: HouseType, moveInYear = 2026, specialHousehold = false): number {
   const currentRule = moveInYear <= 2027;
-  if (houseType === 'long_term') return currentRule ? (specialHousehold ? 5000 : 4500) : (specialHousehold ? 4500 : 3500);
+  if (moveInYear < 2026 || moveInYear > 2030) return 0;
+  if (houseType === 'long_term') return specialHousehold ? 5000 : 4500;
   if (houseType === 'zeh') return specialHousehold ? 4500 : 3500;
   return currentRule ? (specialHousehold ? 3000 : 2000) : 0;
 }
 export function getTaxYears(houseType: HouseType, moveInYear: number): number {
+  if (moveInYear < 2026 || moveInYear > 2030) return 0;
   if (houseType === 'general' && moveInYear >= 2028) return 0;
   return 13;
 }
@@ -128,111 +135,7 @@ export function calcPropertyTax(housing: SimData['housing'], loan: SimData['loan
   };
 }
 
-// ─── 3期間ローン月別シミュレーション ───
-function calc3PhaseLoan(data: SimData, loanMan: number) {
-  const l = data.loan;
-  const rates   = l.loanType === 'fix' ? [l.fixRate1, l.fixRate2, l.fixRate3] : [l.varRate1, l.varRate2, l.varRate3];
-  const periods = l.loanType === 'fix' ? [l.fixPeriod1, l.fixPeriod2, l.years] : [l.varPeriod1, l.varPeriod2, l.years];
 
-  const prepayMap: Record<number, number> = {};
-  if (l.pamount  > 0) prepayMap[l.pyear  * 12] = (prepayMap[l.pyear  * 12] || 0) + l.pamount  * 1e4;
-  if (l.pamount2 > 0) prepayMap[l.pyear2 * 12] = (prepayMap[l.pyear2 * 12] || 0) + l.pamount2 * 1e4;
-
-  const loanOutByYear: Record<number, number> = {};
-  const prepayByYear: Record<number, number> = {};
-  // 年末残高（経過年 y のときの残高 = y*12 ヶ月返済後の残高）
-  //   balanceByYear[0] = 初期残高（返済前）
-  //   balanceByYear[y] = y 年経過時点の残高（y 年分の返済を行った後）
-  const startingBalance = loanMan * 1e4;
-  const balanceByYear: Record<number, number> = { 0: startingBalance };
-  let balance = startingBalance;
-  let mo = 0, lastRate = -1, lastPhase = -1;
-  let endMonth = l.years * 12;
-  const bonusMonths = l.bonusTimes === 2 ? [5, 11] : l.bonusTimes === 3 ? [3, 7, 11] : l.bonusTimes === 1 ? [11] : [];
-
-  function getRateAtMonth(m: number) {
-    if (m < periods[0] * 12) return rates[0];
-    if (m < periods[1] * 12) return rates[1];
-    return rates[2];
-  }
-  function getPhaseAtMonth(m: number) {
-    if (m < periods[0] * 12) return 0;
-    if (m < periods[1] * 12) return 1;
-    return 2;
-  }
-
-  // ボーナス払いを含め、残り期間で完済するための通常月返済額。
-  // これでボーナス分を初期元本から二重に控除しない。
-  function calcMonthlyWithBonus(principal: number, rate: number, startMonth: number) {
-    const remainingMonths = l.years * 12 - startMonth;
-    if (principal <= 0 || remainingMonths <= 0) return 0;
-    const mr = rate / 100 / 12;
-    let futureBonus = 0;
-    for (let offset = 0; offset < remainingMonths; offset++) {
-      if (bonusMonths.includes((startMonth + offset) % 12)) {
-        const periodsAfterPayment = remainingMonths - offset - 1;
-        futureBonus += l.bonusAmount * 1e4 * Math.pow(1 + mr, periodsAfterPayment);
-      }
-    }
-    if (mr <= 0) return Math.max(0, (principal - futureBonus) / remainingMonths);
-    const factor = Math.pow(1 + mr, remainingMonths);
-    return Math.max(0, (principal * factor - futureBonus) * mr / (factor - 1));
-  }
-
-  // 各期の月返済額スナップショット
-  const monthlyByPhase: [number, number, number] = [0, 0, 0];
-
-  for (let m = 0; m < l.years * 12; m++) {
-    if (balance <= 0) { endMonth = m; break; }
-    const r = getRateAtMonth(m);
-    const phaseIdx = getPhaseAtMonth(m);
-    const mr = r / 100 / 12;
-    if (r !== lastRate || phaseIdx !== lastPhase) {
-      const newMo = calcMonthlyWithBonus(balance, r, m);
-      mo = (l.ptype === '期間短縮' && mo > 0) ? Math.max(mo, newMo) : newMo;
-      lastRate = r;
-      lastPhase = phaseIdx;
-      // スナップショット（期が変わるたびに該当期の月返済を記録）
-      monthlyByPhase[phaseIdx] = mo;
-    }
-    const interest = balance * mr;
-    const principal = Math.min(Math.max(0, mo - interest), balance);
-    balance -= principal;
-    let pay = principal + interest;
-    // ボーナス払い
-    if (bonusMonths.includes(m % 12) && l.bonusAmount > 0 && balance > 0) {
-      const bp = Math.min(l.bonusAmount * 1e4, balance);
-      balance -= bp; pay += bp;
-    }
-    // 繰り上げ返済
-    let prepay = 0;
-    if (prepayMap[m + 1] && balance > 0) {
-      prepay = Math.min(prepayMap[m + 1], balance);
-      balance -= prepay;
-      if (l.ptype === '返済額軽減' && balance > 0) {
-        mo = calcMonthlyWithBonus(balance, r, m + 1);
-      }
-    }
-    balance = Math.max(0, balance);
-    const yi = Math.floor(m / 12);
-    loanOutByYear[yi] = (loanOutByYear[yi] || 0) + pay;
-    prepayByYear[yi] = (prepayByYear[yi] || 0) + prepay;
-    // 年末（その年の最終月）の残高を記録
-    if ((m + 1) % 12 === 0) balanceByYear[yi + 1] = balance;
-    if (balance <= 0) {
-      // 完済後の年は残高 0 で埋める
-      const finishedYear = Math.ceil((m + 1) / 12);
-      for (let yy = finishedYear; yy <= l.years; yy++) balanceByYear[yy] = 0;
-      endMonth = m + 1;
-      break;
-    }
-  }
-  // 念のため未記録の年も 0 で埋める（ループが正常完走した場合の保険）
-  for (let yy = 1; yy <= l.years; yy++) {
-    if (balanceByYear[yy] === undefined) balanceByYear[yy] = 0;
-  }
-  return { loanOutByYear, prepayByYear, completionMonth: endMonth, monthlyByPhase, balanceByYear };
-}
 
 // ─── 給与カーブ（現実的な昇給→ピーク→役職定年→再雇用）───
 //   age ≤ 50  : 通常昇給（growthRate %/年）
@@ -276,56 +179,7 @@ export function estimatePensionMonthly(income: number, workYears: number): numbe
   return Math.round((basic + kosei) * 10) / 10;
 }
 
-// ─── 太陽光 ───
-//   月別配列を返す。優先順位:
-//   1. genAuto=false & genM 12個 → genM そのまま
-//   2. genAnnualKwh > 0 → 年間値を月別係数で按分
-//   3. それ以外 → パネル容量×1100×パワコン効率 を月別係数で按分
-export function solarMonthlyGenArr(s: SimData['solar']): number[] {
-  if (!s.genAuto && s.genM.length === 12) return s.genM;
-  const pcRatio = s.solarKw > 0 ? Math.min(1, s.powerconKw / s.solarKw) : 1;
-  const autoAnnual = s.solarKw * 1100 * pcRatio;
-  const annual = s.genAnnualKwh > 0 ? s.genAnnualKwh : autoAnnual;
-  return MFACTORS.map(f => Math.round(annual * f / 12));
-}
 
-function solarAnnualFitCalc(s: SimData['solar'], d: { dailySelf: number; dailySell: number }): number {
-  return d.dailySelf * 365 * s.elecPriceDay / 1e4 + d.dailySell * 365 * s.fitRate / 1e4;
-}
-function solarAnnualPostCalc(s: SimData['solar'], d: { dailySelf: number; dailySell: number }): number {
-  return d.dailySelf * 365 * s.elecPriceDay / 1e4 + d.dailySell * 365 * s.fitRateAfter / 1e4;
-}
-
-// ─── 教育費 ───
-const EDU: Record<string, { years: number; annual: number; total: number }> = {
-  '公立中学':   { years: 3, annual: 52.9,  total: 158.7 },
-  '私立中学':   { years: 3, annual: 143.6, total: 430.7 },
-  '公立高校':   { years: 3, annual: 51.3,  total: 154 },
-  '私立高校':   { years: 3, annual: 105.4, total: 316.2 },
-  '国公立大学': { years: 4, annual: 60.7,  total: 242.6 },
-  '私立文系':   { years: 4, annual: 93.5,  total: 396.5 },
-  '私立理系':   { years: 4, annual: 129.3, total: 542.5 },
-  '専門学校(2年)': { years: 2, annual: 100, total: 200 },
-  '専門学校(3年)': { years: 3, annual: 90,  total: 270 },
-  '就職':       { years: 0, annual: 0,     total: 0 },
-};
-
-function calcEdu(mid: string, high: string, uni: string, alone: number, aloneMonthly: number) {
-  const mi = EDU[mid]  ?? { total: 0 };
-  const hi = EDU[high] ?? { total: 0 };
-  const ui = EDU[uni]  ?? { total: 0 };
-  const aloneTotal = Math.round(aloneMonthly * 12 * alone * 10) / 10;
-  return { total: (mi.total || 0) + (hi.total || 0) + (ui.total || 0) + aloneTotal };
-}
-
-// 子の今の年齢から今年の教育費を返す
-function eduAnnualByAge(age: number, mid: string, high: string, uni: string): number {
-  if (age >= 6  && age < 12) return EDU['公立中学']?.annual ?? 0; // 小学は公立想定
-  if (age >= 12 && age < 15) return (EDU[mid]?.annual  ?? 0);
-  if (age >= 15 && age < 18) return (EDU[high]?.annual ?? 0);
-  if (age >= 18 && age < 18 + (EDU[uni]?.years ?? 0)) return (EDU[uni]?.annual ?? 0);
-  return 0;
-}
 
 // ─── 状態判定 ───
 function judgeStatus(net: number, eduMaint: number): YearRow['status'] {
@@ -358,7 +212,7 @@ export function calcSpouseLeaveYear(
   spouseAnnualIncome: number,
   spouseAnnualBonus: number,
 ) {
-  const baseline = (spouseAnnualIncome + spouseAnnualBonus) * takeHomeRate(spouseAnnualIncome + spouseAnnualBonus);
+  const baseline = (spouseAnnualIncome + spouseAnnualBonus) * clamp((basic.spouseTakeHomePct ?? 80) / 100, 0, 1);
   if (!basic.spouseEnabled || !basic.spouseLeaveEnabled || basic.spouseLeaveMonths <= 0) {
     return { income: baseline, loss: 0, leaveMonths: 0, returnedMonths: 0 };
   }
@@ -368,7 +222,7 @@ export function calcSpouseLeaveYear(
   const maternityMonths = Math.min(totalLeaveMonths, Math.max(0, Math.round(basic.spouseMaternityMonths)));
   const leaveEndMonth = startMonth + totalLeaveMonths;
   const returnRate = Math.max(0, Math.min(100, basic.spouseReturnIncomeRate)) / 100;
-  const monthlyGross = (spouseAnnualIncome + spouseAnnualBonus) / 12;
+  const monthlyGross = spouseAnnualIncome / 12;
   const monthlyTake = baseline / 12;
 
   let income = 0;
@@ -407,8 +261,8 @@ export function calcSpouseLeaveMonthlyBreakdown(
   spouseAnnualIncome: number,
   spouseAnnualBonus: number,
 ) {
-  const baselineMonthly = (spouseAnnualIncome + spouseAnnualBonus) * takeHomeRate(spouseAnnualIncome + spouseAnnualBonus) / 12;
-  const monthlyGross = (spouseAnnualIncome + spouseAnnualBonus) / 12;
+  const baselineMonthly = (spouseAnnualIncome + spouseAnnualBonus) * clamp((basic.spouseTakeHomePct ?? 80) / 100, 0, 1) / 12;
+  const monthlyGross = spouseAnnualIncome / 12;
   const totalLeaveMonths = Math.max(0, Math.round(basic.spouseLeaveMonths));
   const maternityMonths = Math.min(totalLeaveMonths, Math.max(0, Math.round(basic.spouseMaternityMonths)));
   const childcareMonths = Math.max(0, totalLeaveMonths - maternityMonths);
@@ -470,367 +324,193 @@ export function lookupManualSalary(arr: number[], targetAge: number): number {
 
 // ─── メイン計算 ───
 export function calcAll(data: SimData): CalcResult {
-  const { basic, housing, loan, solar, maint, household } = data;
-  const startYear = new Date().getFullYear();
-
-  // 借入額
-  const miscAmt = housing.miscMode === '100' ? housing.building : Math.round(housing.building * housing.miscPct / 100);
-  const totalCost = housing.land + housing.building + housing.fuka + housing.exterior + miscAmt;
-  const loanAuto = Math.max(0, totalCost - housing.down);
-  const loanMan = housing.actualLoan > 0 ? housing.actualLoan : loanAuto;
-
-  // 3期間ローン
-  const lc = calc3PhaseLoan(data, loanMan);
-  const monthly = lc.monthlyByPhase[0] / 1e4;
-  const repaymentYears = Math.ceil(lc.completionMonth / 12);
-  const completionAge = basic.age + repaymentYears;
-  let actualTotalRepay = 0;
-  Object.values(lc.loanOutByYear).forEach(v => actualTotalRepay += v);
-  let actualPrepayTotal = 0;
-  Object.values(lc.prepayByYear).forEach(v => actualPrepayTotal += v);
-  actualTotalRepay = Math.round((actualTotalRepay + actualPrepayTotal) / 1e4);
-  const actualTotalInt = Math.round(actualTotalRepay - loanMan);
-  const taxBorrowLimit = getTaxBorrowLimit(loan.taxHouseType, loan.taxMoveInYear, loan.taxSpecialHousehold);
-  const taxDeductionYears = getTaxYears(loan.taxHouseType, loan.taxMoveInYear);
-  const taxLoanAmount = loan.taxLoanAmount > 0 ? Math.min(loan.taxLoanAmount, loanMan) : loanMan;
-  const taxPair = basic.loanBorrowType === 'pair' && basic.spouseEnabled;
-  const taxMainShare = taxPair ? (loan.taxPairMainShare > 0 ? loan.taxPairMainShare : 50) : 100;
-  let taxDeductionTotal = 0, taxDeductionMain = 0, taxDeductionSpouse = 0;
-  for (let y = 0; y < taxDeductionYears; y++) {
-    const yearEndBalance = Math.min(taxLoanAmount, (lc.balanceByYear[y + 1] ?? 0) / 1e4);
-    const main = Math.min(yearEndBalance * taxMainShare / 100, taxBorrowLimit) * 0.007;
-    const spouse = taxPair ? Math.min(yearEndBalance * (100 - taxMainShare) / 100, taxBorrowLimit) * 0.007 : 0;
-    taxDeductionMain += main;
-    taxDeductionSpouse += spouse;
-    taxDeductionTotal += main + spouse;
-  }
-
-  // 固定資産税
-  const pt = calcPropertyTax(housing, loan);
-
-  // 太陽光計算
-  const monthlyGenA = solarMonthlyGenArr(solar);
-  const annualKwh = monthlyGenA.reduce((a, b) => a + b, 0);
-  const dailyGen = annualKwh / 365;
-  const dailyUse = solar.monthlyUsage / 30;
-  const dayUse = dailyUse * solar.dayUsageRatio / 100;
-  const nightUse = dailyUse * (1 - solar.dayUsageRatio / 100);
-  // 自家消費率: 蓄電池ON時は selfRateBatt（高い方）、OFF時は selfRateSolar を採用
-  const srSolarOnly = solar.selfRateManual ? solar.selfRateSolar / 100 : Math.min(1, dayUse / Math.max(dailyGen, 0.001));
-  const srBatt = solar.selfRateManual
-    ? solar.selfRateBatt / 100
-    : Math.min(0.95, srSolarOnly + (solar.battCapacity * Math.max(0, 1 - solar.dayUsageRatio / 100)) / Math.max(dailyGen, 0.001));
-  const srEffective = solar.battEnabled ? srBatt : srSolarOnly;
-  const dailySelf = dailyGen * srEffective;
-  const dailySell = Math.max(0, dailyGen - dailySelf);
-  const autoElecBill = Math.round(solar.monthlyUsage * (solar.dayUsageRatio / 100 * solar.elecPriceDay + (1 - solar.dayUsageRatio / 100) * solar.elecPriceNight) / 1e4 * 100) / 100;
-  const effectiveElecBill = (solar.elecBillManual !== null && solar.elecBillManual > 0) ? solar.elecBillManual : autoElecBill;
-  const dailyBuyDay = Math.max(0, dayUse - dailySelf);
-  const afterBillRaw = Math.max(0, (dailyBuyDay * solar.elecPriceDay + nightUse * solar.elecPriceNight) * 365 / 1e4 / 12);
-  const afterBill = solar.solarKw <= 0 ? effectiveElecBill : afterBillRaw;
-  const solarAnnualFit = solarAnnualFitCalc(solar, { dailySelf, dailySell });
-  const solarAnnualPost = solarAnnualPostCalc(solar, { dailySelf, dailySell });
-
-  // 年金
-  const workYears = Math.min(40, loan.years > 0 ? loan.years : basic.retireAge - 22);
-  const wY = Math.min(40, basic.retireAge - 22);
-  const spWY = basic.spouseEnabled ? Math.min(40, basic.spouseRetireAge - 22) : 0;
-  const pensionM = estimatePensionMonthly(basic.income, wY);
-  const spPensionM = basic.spouseEnabled ? estimatePensionMonthly(basic.spouseIncome, spWY) : 0;
-
-  // 教育費イベント（子ごと）
-  type EduEvt = Record<number, number>;
-  const eduEvents: EduEvt = {};
-  const kids = [
-    { age: basic.c1age, mid: basic.c1mid, high: basic.c1high, uni: basic.c1uni, alone: basic.c1alone },
-    { age: basic.c2age, mid: basic.c2mid, high: basic.c2high, uni: basic.c2uni, alone: basic.c2alone },
-    { age: basic.c3age, mid: basic.c3mid, high: basic.c3high, uni: basic.c3uni, alone: basic.c3alone },
-  ].slice(0, basic.kids);
-
-  // キャッシュフロー（必ず60年分）
-  //   初期残高 = (世帯主貯蓄 + 配偶者貯蓄) − 頭金
+  const { basic: b, housing: h, loan: l, solar: s, household: hh } = data;
+  const startYear = Number(b.date?.slice(0, 4)) || new Date().getFullYear();
+  const warnings: string[] = [];
+  const miscAmt = h.miscMode === '100' ? h.building : h.building * h.miscPct / 100;
+  const solarInitial = solarInitialCost(s);
+  const baseCost = h.land + h.building + h.fuka + h.exterior + miscAmt;
+  const totalCost = baseCost + (s.funding === 'included' ? 0 : solarInitial);
+  const mortgageCost = baseCost + (s.funding === 'loan' ? solarInitial : 0);
+  const loanAuto = Math.max(0, mortgageCost - h.down);
+  const loanMan = h.actualLoan > 0 ? h.actualLoan : loanAuto;
+  const cashRequired = Math.max(0, totalCost - loanMan);
+  const initialSavings = b.savings + (b.spouseEnabled ? b.spouseSavings : 0);
+  const initialCash = initialSavings - cashRequired;
+  const lc = loanSchedule(l, loanMan);
+  const monthly = lc.phaseMonthly.find(v => v > 0) ?? 0;
+  const repaymentYears = loanMan > 0 ? Math.ceil(lc.completionMonth / 12) : 0;
+  const pt = calcPropertyTax(h, l);
+  const firstEnergy = energyYear(data);
+  const postEnergy = energyYear({ ...data, solar: { ...s, fitYears: 0 } });
+  const pensionM = b.pensionMonthly ?? estimatePensionMonthly(b.income, Math.max(0, b.retireAge - 22)) * 0.9;
+  const spPensionM = b.spouseEnabled
+    ? b.spousePensionMonthly ?? estimatePensionMonthly(b.spouseIncome, Math.max(0, b.spouseRetireAge - 22)) * 0.9 : 0;
+  const kids = childrenOf(b);
+  const costs = data.educationCosts ?? DEFAULT_DATA.educationCosts;
+  const workLiving = hh.food + hh.transport + hh.daily + hh.clothes + hh.hobby + hh.car + hh.social + hh.medical + hh.other
+    + hh.ins1 + hh.ins2 + hh.ins3 + hh.ins4 + hh.ins5 + hh.ins6;
+  const retLiving = hh.retFood + hh.retTransport + hh.retDaily + hh.retClothes + hh.retHobby + hh.retCar + hh.retSocial
+    + hh.retMedical + hh.retOther + hh.retIns1 + hh.retIns2 + hh.retIns3 + hh.retIns4;
+  const taxBorrowLimit = getTaxBorrowLimit(l.taxHouseType, l.taxMoveInYear, l.taxSpecialHousehold);
+  const taxDeductionYears = getTaxYears(l.taxHouseType, l.taxMoveInYear);
+  const taxPair = b.loanBorrowType === 'pair' && b.spouseEnabled;
+  const share = taxPair ? clamp(l.taxPairMainShare, 0, 100) / 100 : 1;
+  const eligibleLoanFraction = loanMan > 0 && l.taxLoanAmount > 0 ? Math.min(1, l.taxLoanAmount / loanMan) : 1;
+  const taxBaseMain = ((b.salaryAuto ? b.income : lookupManualSalary(b.salaryManual, b.age)) + b.annualBonusInc) * (b.takeHomePct ?? 80) / 100;
+  const taxBaseSpouse = ((b.salSpouseAuto ? b.spouseIncome : lookupManualSalary(b.spouseSalaryManual, b.spouseAge)) + b.spouseAnnualBonusInc) * (b.spouseTakeHomePct ?? 80) / 100;
+  let taxDeductionMain = 0, taxDeductionSpouse = 0;
+  let otherBalance = Math.max(0, hh.otherLoanBalance);
+  let balance = initialCash;
   const rows: YearRow[] = [];
-  let balance = (basic.savings + (basic.spouseSavings ?? 0) - housing.down) * 1e4;
 
-  // 現役月支出（家計費合計）
-  const hhWork = (household.food + household.transport + household.daily + household.clothes
-    + household.hobby + household.car + household.social + household.medical + household.other
-    + household.ins1 + household.ins2 + household.ins3 + household.ins4 + household.ins5 + household.ins6
-    + household.otherLoan) * 1e4;
-  // 退職後月支出
-  const hhRet = (household.retFood + household.retTransport + household.retDaily + household.retClothes
-    + household.retHobby + household.retCar + household.retSocial + household.retMedical + household.retOther
-    + household.retIns1 + household.retIns2 + household.retIns3 + household.retIns4) * 1e4;
-
-  // 生涯集計（simYears 期間内のみ加算）
-  const lp = data.simYears;
-  let lifeIncWage = 0, lifeIncPension = 0, lifeIncRetBonus = 0, lifeIncTaxBack = 0, lifeIncSolar = 0, lifeIncSiPayout = 0;
-  let lifeLeaveIncomeLoss = 0;
-  let lifeExpLoanPay = 0, lifeExpPropTax = 0, lifeExpLiving = 0, lifeExpUtility = 0, lifeExpEdu = 0, lifeExpMaint = 0, lifeExpSudden = 0, lifeExpSiPaid = 0;
+  if (initialCash < 0) warnings.push('購入時の自己資金が不足しています。借入額と初期費用を再確認してください。');
+  if (loanMan > mortgageCost) warnings.push('借入額が住宅・ローン対象設備費を上回っています。超過借入分は使途未確認のため手元資金に加えていません。');
+  if (h.actualLoan > 0 && Math.abs(h.actualLoan - loanAuto) > 0.01) warnings.push('実借入額を優先し、総費用との差額を貯蓄から支出します。表示上の頭金とは一致しない場合があります。');
+  if (l.years < 1 || l.years > 60 || !Number.isInteger(l.years)) warnings.push('返済期間は1〜60年の整数が必要です。未確定の入力では提案に使用しないでください。');
+  if ((l.pamount > 0 && (l.pyear < 1 || l.pyear > l.years)) || (l.pamount2 > 0 && (l.pyear2 < 1 || l.pyear2 > l.years)))
+    warnings.push('繰上返済年は返済期間内の1年目以降で設定してください。');
+  if (hh.otherLoan > 0 && hh.otherLoanBalance <= 0 && hh.otherLoanMonths <= 0)
+    warnings.push('他ローンの残高・残り月数が未入力です。過小評価を避けるため月々の返済を60年間計上しています。残高または残り月数を入力してください。');
+  if (hh.otherLoanBalance > 0 && hh.otherLoan <= hh.otherLoanBalance * (hh.otherLoanRate ?? 0) / 1200)
+    warnings.push('他ローンの返済額が利息以下です。残高が減りません。');
+  if (b.pensionMonthly === null || (b.spouseEnabled && b.spousePensionMonthly === null))
+    warnings.push('年金は簡易推計（概算額の90%を手取り扱い）です。ねんきん定期便等の見込額・税社会保険料で確認してください。');
+  if (b.salaryAuto || (b.spouseEnabled && b.salSpouseAuto))
+    warnings.push('給与の自動推移は50歳まで昇給、51〜54歳横ばい、55〜59歳年3%減、60歳35%減、以降年1%減の仮定です。勤務先の実態を確認してください。');
+  if (b.spouseEnabled && b.spouseLeaveEnabled) warnings.push('産休・育休給付は概算率による計算です。給付上限・受給資格・追加給付は未反映のため、勤務先の見込額を確認してください。');
+  if (b.loanBorrowType === 'pair' && b.spouseEnabled) warnings.push('ペアローンは共通の金利・返済期間で合算試算します。契約が異なる場合は個別の返済予定表との照合が必要です。');
+  if (b.retireAge > b.pensionStartAge || (b.spouseEnabled && b.spouseRetireAge > b.pensionStartAge)) warnings.push('在職中の年金減額は自動計算しません。年金の手取り見込額で確認してください。');
+  if (l.taxInclude) warnings.push('住宅ローン控除は確認した年間上限の範囲で概算計上します。所得・居住・床面積・持分・繰上返済などの適用条件と実際の税額は別途確認が必要です。');
+  else warnings.push('住宅ローン控除は未確認のため手元資金に加えていません。');
+  if (l.taxMoveInYear !== startYear) warnings.push('試算開始年と入居年が一致していません。控除は資金計画へ計上していません。');
+  if (l.taxMoveInYear < 2026 || l.taxMoveInYear > 2030) warnings.push('入力した入居年は控除の対応範囲（2026〜2030年）外です。');
+  if (l.taxHouseType === 'general' && l.taxMoveInYear >= 2028) warnings.push('2028年以降の省エネ基準適合住宅の経過措置は個別確認が必要です。控除は計上していません。');
+  if (h.propTaxBuildingValue === null || h.propTaxLandValue === null)
+    warnings.push('固定資産税は出雲市の税率・仮評価額による概算です。評価替え・建物の経年減価は含みません。市外の物件は別途確認してください。');
+  if (s.enabled && s.solarKw > 0) {
+    if (s.fitStepYears > s.fitYears) warnings.push('売電の第1段階終了がFIT終了より後です。FIT終了後単価が優先されるため、契約期間を修正してください。');
+    warnings.push(s.funding === 'included' ? '太陽光・蓄電池の初期費用は建物等の見積に含む設定です。見積で二重計上・計上漏れがないか確認してください。'
+      : s.funding === 'loan' ? '太陽光・蓄電池の初期費用を住宅費に加算しています。実借入額が手動の場合は借入増額の確認が必要です。' : '太陽光・蓄電池の初期費用を現金支出として購入時に計上しています。');
+    warnings.push('発電・自家消費は月別平均による概算です。天候・積雪・影・機器の実効容量・料金改定を保証しません。売電契約の単価と期間をご確認ください。');
+    if (s.battEnabled && s.battCost <= 0) warnings.push('蓄電池が有効ですが初期費用は0円です。見積に含むか確認してください。');
+  }
+  if (s.battEnabled && (!s.enabled || s.solarKw <= 0)) warnings.push('蓄電池単独での運用は未対応です。太陽光が無効のため、設備費・効果は計上していません。');
+  if (hh.inflationRate === 0) warnings.push('物価上昇率は0%です。長期の生活費・教育費・修繕費が変わらない仮定になっています。');
+  if (!(data.suddenExpenses ?? []).some(e => /旅行/.test(e.name) && e.amount > 0)) warnings.push('旅行の予定支出が未設定です。希望がある場合は金額を追加してください。');
+  if (!(data.suddenExpenses ?? []).some(e => /車.*(替|購入)/.test(e.name) && e.amount > 0)) warnings.push('車の買い替えが未設定です。月々の車両費と分けて確認してください。');
+  warnings.push('0〜2歳の保育料、大学等の入学金・教材費、介護・災害・相続・児童手当・補助金・運用益・不動産売却額は自動計上しません。必要な支出は予定支出に追加してください。');
 
   for (let y = 0; y < 60; y++) {
-    const age = basic.age + y;
-    const calYear = startYear + y;
+    const year = y + 1;
+    const ageStart = b.age + y;
+    const spouseAgeStart = b.spouseAge + y;
+    const isWork = ageStart < b.retireAge;
     const events: string[] = [];
-    const isWork = age < basic.retireAge;
-
-    // ─── 収入（手取り概算） ───
-    //   主・配偶者それぞれ独立に「給与 / 年金 / 空白期間」を切替
-    //     - 給与: age < retireAge（その人の定年年齢）
-    //     - 年金: age >= pensionStartAge（共通の年金開始年齢）
-    //     - 空白期間: retireAge ≤ age < pensionStartAge（退職済みだが年金未開始）→ 無収入
-    let income = 0;
-    // 主の収入
-    if (age < basic.retireAge) {
-      const mainInc = basic.salaryAuto
-        ? projectSalary(basic.income, basic.age, age, basic.incomeGrowth)
-        : lookupManualSalary(basic.salaryManual, age);
-      const mainBonus = basic.annualBonusInc;
-      const thr = takeHomeRate(mainInc);
-      income += (mainInc + mainBonus) * thr;
-    } else if (age >= basic.pensionStartAge) {
-      income += pensionM * 12;
-    }
-    // 配偶者の収入
-    let leaveIncomeLoss = 0;
-    if (basic.spouseEnabled) {
-      const spAge = basic.spouseAge + y;
-      if (spAge < basic.spouseRetireAge) {
-        const spInc = basic.salSpouseAuto
-          ? projectSalary(basic.spouseIncome, basic.spouseAge, spAge, basic.spouseGrowth)
-          : lookupManualSalary(basic.spouseSalaryManual, spAge);
-        const spBonus = basic.spouseAnnualBonusInc;
-        const leave = calcSpouseLeaveYear(basic, y, spInc, spBonus);
-        income += leave.income;
-        leaveIncomeLoss = leave.loss;
-        if (leave.leaveMonths > 0) {
-          events.push(`配偶者 産休・育休中 (${leave.leaveMonths}か月)`);
-        }
-        if (leave.returnedMonths > 0 && basic.spouseReturnIncomeRate < 100) {
-          events.push(`配偶者 復帰後時短 (${basic.spouseReturnIncomeRate}%)`);
-        }
-      } else if (spAge >= basic.pensionStartAge) {
-        income += spPensionM * 12;
-      }
-    }
-
-    // 退職金
-    let retBonusY = 0;
-    if (age === basic.retireAge) {
-      retBonusY = basic.retireBonus + (basic.spouseEnabled ? basic.spouseRetireBonus : 0);
-      events.push('定年退職', '退職金入金');
-    }
-    if (age === basic.pensionStartAge) events.push('年金開始');
-
-    // ─── 支出 ───
-    // ローン（通常返済 + 繰上返済を合算してキャッシュ支出に計上）
-    const regularLoanPay = Math.round((lc.loanOutByYear[y] || 0) / 1e4);
-    const prepayY = Math.round((lc.prepayByYear[y] || 0) / 1e4);
-    const loanPay = regularLoanPay + prepayY;
-    // 残高は実際の月別シミュレーション結果を使用（金利切替・ボーナス・繰上返済を反映）
-    //   ローン期間を超えた年は 0
-    const loanBalance = y > loan.years
-      ? 0
-      : Math.round((lc.balanceByYear[y] ?? 0) / 1e4);
-    if (prepayY > 0) events.push(`⏩ 繰上返済 ${prepayY}万`);
-    if (y > 0 && regularLoanPay === 0 && Math.round((lc.loanOutByYear[y - 1] || 0) / 1e4) > 0) events.push('ローン完済');
-
-    // 住宅ローン減税（年末残高×0.7%、借入限度額あり）
-    // ボーナス払い・繰上返済後の実際の年末残高を基準にする。
-    const yearEndBalance = Math.min(taxLoanAmount, (lc.balanceByYear[y + 1] ?? 0) / 1e4);
-    const loanTaxMain = y < taxDeductionYears
-      ? Math.min(yearEndBalance * taxMainShare / 100, taxBorrowLimit) * 0.007
-      : 0;
-    const loanTaxSp = taxPair && y < taxDeductionYears
-      ? Math.min(yearEndBalance * (100 - taxMainShare) / 100, taxBorrowLimit) * 0.007
-      : 0;
-    const loanTaxBack = loanTaxMain + loanTaxSp;
-
-    // 貯蓄型保険の月々支払い（満期前のみ・万円/月）
-    const siMonthly = (data.savingsInsurances ?? [])
-      .filter(si => y < si.payoutYear)
-      .reduce((sum, si) => sum + si.monthly, 0);
-    // 貯蓄型保険の満期受取（その年に下りる金額・万円）
-    let siPayout = 0;
-    for (const si of (data.savingsInsurances ?? [])) {
-      if (si.payoutYear === y && si.payoutAmount > 0) {
-        siPayout += si.payoutAmount;
-        events.push(`💎 ${si.name || '貯蓄型保険'}満期 +${si.payoutAmount}万`);
-      }
-    }
-
-    // 生活費（光熱費除く）— 貯蓄型保険の月々支払いも加算
-    const livingOut = (isWork ? hhWork : hhRet) * 12 + siMonthly * 1e4 * 12;
-
-    // 光熱費（電気/ガス/水道を別々に計上 ※ 退職後は LCC の retUtility を採用）
-    //   電気代は「太陽光なしの現在の電気代」を採用。太陽光効果（節電+売電）は別途 solarB として net に加算
-    let utilityY: number;
+    const factor = (1 + clamp(hh.inflationRate, 0, 20) / 100) ** y;
+    let wage = 0, pension = 0, mainWage = 0, spouseWage = 0, leaveIncomeLoss = 0;
     if (isWork) {
-      const elec = effectiveElecBill;  // 現在の電気代（noSolarMonthly 相当）
-      const gasW = household.gasMonthly;
-      const water = household.waterMonthly;
-      utilityY = (elec + gasW + water) * 12;
-    } else {
-      // 退職後はLCCシートで設定したretUtility（月額合計）を採用
-      utilityY = (household.retUtility > 0 ? household.retUtility : (household.electricMonthly + household.gasMonthly + household.waterMonthly)) * 12;
+      const gross = b.salaryAuto ? projectSalary(b.income, b.age, ageStart, b.incomeGrowth) : lookupManualSalary(b.salaryManual, ageStart);
+      mainWage = (gross + b.annualBonusInc) * clamp(b.takeHomePct ?? 80, 0, 100) / 100;
+      wage += mainWage;
     }
-
-    // 固定資産税
+    if (ageStart >= b.pensionStartAge) pension += pensionM * 12;
+    if (b.spouseEnabled) {
+      if (spouseAgeStart < b.spouseRetireAge) {
+        const gross = b.salSpouseAuto ? projectSalary(b.spouseIncome, b.spouseAge, spouseAgeStart, b.spouseGrowth) : lookupManualSalary(b.spouseSalaryManual, spouseAgeStart);
+        const leave = calcSpouseLeaveYear(b, y, gross, b.spouseAnnualBonusInc);
+        spouseWage = leave.income;
+        wage += spouseWage;
+        leaveIncomeLoss = leave.loss;
+        if (leave.leaveMonths > 0) events.push('配偶者 産休・育休 ' + leave.leaveMonths + 'か月');
+      }
+      if (spouseAgeStart >= b.pensionStartAge) pension += spPensionM * 12;
+    }
+    let retBonus = 0;
+    if (b.retireAge > b.age && year === b.retireAge - b.age) {
+      retBonus += b.retireBonus; events.push('世帯主退職');
+    }
+    if (b.spouseEnabled && b.spouseRetireAge > b.spouseAge && year === b.spouseRetireAge - b.spouseAge) {
+      retBonus += b.spouseRetireBonus; events.push('配偶者退職');
+    }
+    const mortgage = lc.annual[y];
+    const loanPay = mortgage.paid + mortgage.prepaid;
+    if (mortgage.prepaid > 0) events.push('繰上返済 ' + mortgage.prepaid.toFixed(1) + '万円');
+    let otherLoanPay = 0;
+    for (let m = 0; m < 12; m++) {
+      const elapsed = y * 12 + m;
+      if (hh.otherLoanBalance > 0) {
+        const due = otherBalance * (1 + clamp(hh.otherLoanRate ?? 0, 0, 100) / 1200);
+        const payment = Math.min(due, hh.otherLoan);
+        otherBalance = Math.max(0, due - payment);
+        otherLoanPay += payment;
+      } else if (hh.otherLoanMonths <= 0 || elapsed < hh.otherLoanMonths) otherLoanPay += hh.otherLoan;
+    }
+    let insurancePremium = 0, insurancePayout = 0;
+    for (const si of data.savingsInsurances ?? []) {
+      if (si.payoutYear >= year) insurancePremium += si.monthly * 12;
+      if (si.payoutYear === year) { insurancePayout += si.payoutAmount; events.push((si.name || '貯蓄型保険') + ' 満期'); }
+    }
+    const living = (isWork ? workLiving : retLiving) * 12 * factor + insurancePremium + otherLoanPay;
+    const energy = energyYear(data, y);
+    const utilityBaseline = (isWork || hh.retUtility <= 0 ? energy.baselineMonthly + hh.gasMonthly + hh.waterMonthly : hh.retUtility) * 12;
+    const solarSaving = Math.min(energy.saving, utilityBaseline) * factor;
+    const utility = Math.max(0, utilityBaseline * factor - solarSaving);
+    const solarSale = energy.sale;
     const propTax = y < pt.reductionYears ? pt.during : pt.after;
-
-    // 教育費
-    let eduCost = 0;
-    for (const k of kids) {
-      const childAge = k.age + y;
-      const ea = eduAnnualByAge(childAge, k.mid, k.high, k.uni);
-      eduCost += ea;
-      // 仕送り（大学期間と一致する場合）
-      const uniYears = EDU[k.uni]?.years ?? 0;
-      if (uniYears > 0 && childAge >= 18 && childAge < 18 + Math.min(k.alone, uniYears)) {
-        eduCost += basic.aloneMonthly * 12;
+    const eduCost = kids.reduce((a, k) => a + childEducation(k, y, b, costs), 0) * factor;
+    let maintCost = solarMaintenance(s, year) * factor;
+    for (const item of data.maint.items) {
+      if (item.enabled && item.cycleYears > 0 && year % Math.max(1, Math.round(item.cycleYears)) === 0) {
+        maintCost += item.cost * factor; events.push(item.name);
       }
     }
-
-    // メンテ費
-    let maintCost = 0;
-    const maintDetails: string[] = [];
-    for (const it of maint.items) {
-      if (!it.enabled || it.cycleYears <= 0) continue;
-      if (y > 0 && y % it.cycleYears === 0) { maintCost += it.cost; maintDetails.push(it.name); }
+    if (solarMaintenance(s, year) > 0) events.push('太陽光設備の点検・更新');
+    let sudden = 0;
+    for (const e of data.suddenExpenses ?? []) if (occursInYear(e, year)) {
+      sudden += e.amount * factor; events.push(e.name || '予定支出');
     }
-    // 太陽光メンテ（パワコン・点検・蓄電池）
-    if (solar.enabled && solar.solarKw > 0 && y > 0) {
-      if (solar.powerconCycle > 0 && y % solar.powerconCycle === 0) { maintCost += solar.powerconCost; maintDetails.push('🔧パワコン'); }
-      if (solar.solarMaintCycle > 0 && y % solar.solarMaintCycle === 0) { maintCost += solar.solarMaintCost; maintDetails.push('☀点検'); }
-      if (solar.battEnabled && solar.battReplaceCycle > 0 && y % solar.battReplaceCycle === 0) { maintCost += solar.battReplaceCost; maintDetails.push('🔋蓄電池'); }
+    let taxBack = 0;
+    if (l.taxInclude && l.taxMoveInYear === startYear && y < taxDeductionYears && l.years >= 10 && mortgage.deductionEligible) {
+      const eligibleBalance = mortgage.balance * eligibleLoanFraction;
+      const capMain = l.taxAnnualCap * Math.min(1, mainWage / Math.max(0.01, taxBaseMain));
+      const capSpouse = l.taxSpouseAnnualCap * Math.min(1, spouseWage / Math.max(0.01, taxBaseSpouse));
+      const main = Math.max(0, Math.min(eligibleBalance * share, taxBorrowLimit) * 0.007);
+      const spouse = taxPair ? Math.max(0, Math.min(eligibleBalance * (1 - share), taxBorrowLimit) * 0.007) : 0;
+      const mainBack = Math.min(main, capMain), spouseBack = Math.min(spouse, capSpouse);
+      taxBack = mainBack + spouseBack;
+      taxDeductionMain += mainBack; taxDeductionSpouse += spouseBack;
     }
-    if (maintDetails.length > 0) events.push('メンテ: ' + maintDetails.join('・'));
-
-    // 太陽光効果（年） — 太陽光導入ONかつ容量>0の時のみ
-    const solarB = (solar.enabled && solar.solarKw > 0)
-      ? (y < solar.fitYears ? solarAnnualFit : solarAnnualPost)
-      : 0;
-
-    // 急な出費（cycleYears ごとに周期発生）
-    //   y > 0 かつ y を cycleYears で割り切れる年に発生
-    let suddenY = 0;
-    for (const e of (data.suddenExpenses ?? [])) {
-      if (e.cycleYears > 0 && y > 0 && y % e.cycleYears === 0 && e.amount > 0) {
-        suddenY += e.amount;
-        events.push(`💸 ${e.name || '臨時支出'} ${e.amount}万`);
-      }
-    }
-
-    // 収支（太陽光効果・貯蓄型保険満期は収入として加算、急な出費は支出）
-    const totalOut = loanPay + livingOut / 1e4 + utilityY + propTax + eduCost + maintCost + suddenY;
-    const net = income + retBonusY + loanTaxBack + solarB + siPayout - totalOut;
-
-    // 生涯集計（simYears 内のみ）
-    if (y < lp) {
-      if (isWork) lifeIncWage += income;
-      else lifeIncPension += income;
-      lifeIncRetBonus += retBonusY;
-      lifeIncTaxBack += loanTaxBack;
-      lifeIncSolar += solarB;
-      lifeIncSiPayout += siPayout;
-      lifeLeaveIncomeLoss += leaveIncomeLoss;
-      lifeExpLoanPay += loanPay;
-      lifeExpPropTax += propTax;
-      lifeExpLiving += livingOut / 1e4 - siMonthly * 12;  // 純生活費（保険料を除く）
-      lifeExpUtility += utilityY;
-      lifeExpEdu += eduCost;
-      lifeExpMaint += maintCost;
-      lifeExpSudden += suddenY;
-      lifeExpSiPaid += siMonthly * 12;
-    }
-    balance += net * 1e4;
-
+    const income = wage + pension + retBonus + insurancePayout + taxBack;
+    const totalOut = loanPay + living + utility + propTax + eduCost + maintCost + sudden;
+    const net = income + solarSale - totalOut;
+    balance += net;
     rows.push({
-      year: y, calYear, age,
-      income: Math.round(income + retBonusY + loanTaxBack + siPayout),
-      loanPay,
-      living: Math.round(livingOut / 1e4),
-      utility: Math.round(utilityY),
-      propTax,
-      eduCost: Math.round(eduCost),
-      maintCost: Math.round(maintCost),
-      solarBenefit: Math.round(solarB),
-      leaveIncomeLoss: Math.round(leaveIncomeLoss),
-      sudden: Math.round(suddenY),
-      taxBack: Math.round(loanTaxBack),
-      retBonus: Math.round(retBonusY),
-      net: Math.round(net),
-      balance: Math.round(balance / 1e4),
-      status: judgeStatus(Math.round(net), Math.round(eduCost + maintCost)),
-      events,
-      loanBalance,
+      year, calYear: startYear + year, age: b.age + year, income, wage, pension, retBonus,
+      insurancePayout, insurancePremium, loanPay, prepaid: mortgage.prepaid, otherLoanPay, otherLoanBalance: otherBalance,
+      living, utility, propTax, eduCost, maintCost, solarBenefit: solarSale, solarSale, solarSaving,
+      leaveIncomeLoss, sudden, taxBack, net, balance, totalOut, loanBalance: mortgage.balance,
+      status: judgeStatus(net, eduCost + maintCost + sudden), events,
     });
   }
-
-  // LCC集計（simYears範囲）— lp は上で定義済み
-  const within = rows.slice(0, lp);
-  const sum = (key: keyof YearRow) => within.reduce((a, r) => a + (r[key] as number), 0);
-
-  // 固定資産税のlccP年総額
-  let propTaxTotal = 0;
-  for (let y = 0; y < lp; y++) propTaxTotal += y < pt.reductionYears ? pt.during : pt.after;
-
-  // 太陽光LCC費用（太陽光 / 蓄電池 それぞれの導入ON時のみ計上）
-  const solarLccCost =
-    (solar.enabled && solar.solarKw > 0 ? solar.solarCost : 0)
-    + (solar.battEnabled ? solar.battCost : 0);
-
-  const lccGrand = sum('utility') + propTaxTotal + sum('eduCost') + sum('maintCost') + solarLccCost;
-
+  const within = rows.slice(0, data.simYears);
+  const sum = (key: keyof YearRow) => within.reduce((a, r) => a + (typeof r[key] === 'number' ? r[key] as number : 0), 0);
   return {
-    rows,
-    loan: loanMan,
-    loanAuto,
-    miscAmt,
-    totalCost,
-    monthly,
-    monthlyPhase1: lc.monthlyByPhase[0] / 1e4,
-    monthlyPhase2: lc.monthlyByPhase[1] / 1e4,
-    monthlyPhase3: lc.monthlyByPhase[2] / 1e4,
-    repaymentYears,
-    completionAge,
-    actualTotalRepay,
-    actualTotalInt,
-    taxBorrowLimit,
-    taxDeductionYears,
-    taxDeductionTotal: Math.round(taxDeductionTotal * 10) / 10,
-    taxDeductionMain: Math.round(taxDeductionMain * 10) / 10,
-    taxDeductionSpouse: Math.round(taxDeductionSpouse * 10) / 10,
-    totalUtility: sum('utility'),
-    totalPropTax: propTaxTotal,
-    totalEdu: sum('eduCost'),
-    totalMaint: sum('maintCost'),
-    totalSolar: sum('solarBenefit'),
-    totalLiving: sum('living'),
-    lccGrand,
-    solarAnnualFit,
-    solarAnnualPost,
-    annualKwh,
-    afterBill,
-    effectiveElecBill,
-    pensionM,
-    spPensionM,
-    // 生涯集計（simYears期間内）— 提案書サマリー用
-    lifeIncWage: Math.round(lifeIncWage),
-    lifeIncPension: Math.round(lifeIncPension),
-    lifeIncRetBonus: Math.round(lifeIncRetBonus),
-    lifeIncTaxBack: Math.round(lifeIncTaxBack),
-    lifeIncSolar: Math.round(lifeIncSolar),
-    lifeIncSiPayout: Math.round(lifeIncSiPayout),
-    lifeLeaveIncomeLoss: Math.round(lifeLeaveIncomeLoss),
-    lifeExpLoanPay: Math.round(lifeExpLoanPay),
-    lifeExpPropTax: Math.round(lifeExpPropTax),
-    lifeExpLiving: Math.round(lifeExpLiving),
-    lifeExpUtility: Math.round(lifeExpUtility),
-    lifeExpEdu: Math.round(lifeExpEdu),
-    lifeExpMaint: Math.round(lifeExpMaint),
-    lifeExpSudden: Math.round(lifeExpSudden),
-    lifeExpSiPaid: Math.round(lifeExpSiPaid),
+    rows, initialSavings, initialCash, cashRequired, solarInitial, warnings,
+    loan: loanMan, loanAuto, miscAmt, totalCost, monthly,
+    monthlyPhase1: lc.phaseMonthly[0], monthlyPhase2: lc.phaseMonthly[1], monthlyPhase3: lc.phaseMonthly[2],
+    repaymentYears, completionAge: b.age + repaymentYears, actualTotalRepay: lc.totalPaid, actualTotalInt: lc.totalInterest,
+    taxBorrowLimit, taxDeductionYears, taxDeductionTotal: taxDeductionMain + taxDeductionSpouse, taxDeductionMain, taxDeductionSpouse,
+    totalUtility: sum('utility'), totalPropTax: sum('propTax'), totalEdu: sum('eduCost'), totalMaint: sum('maintCost'),
+    totalSolar: sum('solarSaving') + sum('solarSale'), totalLiving: sum('living'),
+    lccGrand: cashRequired + sum('totalOut'),
+    solarAnnualFit: firstEnergy.benefit, solarAnnualPost: postEnergy.benefit, annualKwh: firstEnergy.generation,
+    afterBill: firstEnergy.afterMonthly, effectiveElecBill: firstEnergy.baselineMonthly, pensionM, spPensionM,
+    lifeIncWage: sum('wage'), lifeIncPension: sum('pension'), lifeIncRetBonus: sum('retBonus'), lifeIncTaxBack: sum('taxBack'),
+    lifeIncSolar: sum('solarSale'), lifeIncSiPayout: sum('insurancePayout'), lifeLeaveIncomeLoss: sum('leaveIncomeLoss'),
+    lifeExpLoanPay: sum('loanPay'), lifeExpPropTax: sum('propTax'), lifeExpLiving: sum('living') - sum('insurancePremium'),
+    lifeExpUtility: sum('utility'), lifeExpEdu: sum('eduCost'), lifeExpMaint: sum('maintCost'),
+    lifeExpSudden: sum('sudden'), lifeExpSiPaid: sum('insurancePremium'),
   };
 }
 

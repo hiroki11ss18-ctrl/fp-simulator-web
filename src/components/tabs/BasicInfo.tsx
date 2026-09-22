@@ -9,7 +9,6 @@ import {
   estimatePensionMonthly,
   lookupManualSalary,
   projectSalary,
-  takeHomeRate,
 } from '../../hooks/useCalculations';
 import { fmt, fmtMan } from '../../lib/format';
 
@@ -20,19 +19,21 @@ export default function BasicInfo({ data, update }: { data: SimData; update: (p:
   const set = (patch: Partial<BI>) => update({ basic: { ...b, ...patch } });
 
   // 世帯年収・手取り
-  const householdIncome = b.income + b.annualBonusInc + (b.spouseEnabled ? b.spouseIncome + b.spouseAnnualBonusInc : 0);
-  const mainTh = takeHomeRate(b.income + b.annualBonusInc);
-  const spTh = b.spouseEnabled ? takeHomeRate(b.spouseIncome + b.spouseAnnualBonusInc) : 0;
-  const mainTake = (b.income + b.annualBonusInc) * mainTh;
-  const spTake = b.spouseEnabled ? (b.spouseIncome + b.spouseAnnualBonusInc) * spTh : 0;
+  const mainGross = b.age >= b.retireAge ? 0 : (b.salaryAuto ? b.income : lookupManualSalary(b.salaryManual, b.age)) + b.annualBonusInc;
+  const spouseGross = !b.spouseEnabled || b.spouseAge >= b.spouseRetireAge ? 0 : (b.salSpouseAuto ? b.spouseIncome : lookupManualSalary(b.spouseSalaryManual, b.spouseAge)) + b.spouseAnnualBonusInc;
+  const householdIncome = mainGross + spouseGross;
+  const mainTh = b.takeHomePct / 100;
+  const spTh = b.spouseEnabled ? b.spouseTakeHomePct / 100 : 0;
+  const mainTake = mainGross * mainTh;
+  const spTake = spouseGross > 0 ? calcSpouseLeaveYear(b, 0, spouseGross - b.spouseAnnualBonusInc, b.spouseAnnualBonusInc).income : 0;
   const householdTake = mainTake + spTake;
   const householdMonthly = householdTake / 12;
 
   // 年金推計
   const wY = Math.min(40, Math.max(0, b.retireAge - 22));
   const spWY = b.spouseEnabled ? Math.min(40, Math.max(0, b.spouseRetireAge - 22)) : 0;
-  const pensionM = estimatePensionMonthly(b.income, wY);
-  const spPensionM = b.spouseEnabled ? estimatePensionMonthly(b.spouseIncome, spWY) : 0;
+  const pensionM = b.pensionMonthly ?? estimatePensionMonthly(b.income, wY) * 0.9;
+  const spPensionM = b.spouseEnabled ? b.spousePensionMonthly ?? estimatePensionMonthly(b.spouseIncome, spWY) * 0.9 : 0;
 
   // 給与推移テーブル
   const projectionYears = [0, 5, 10, 15, 20, 25, 30, 35].filter(y => b.age + y <= b.retireAge + 5);
@@ -90,16 +91,32 @@ export default function BasicInfo({ data, update }: { data: SimData; update: (p:
       </Card>
 
       {/* 世帯主・配偶者 2列 */}
+      <section className="plan-section">
+        <h2>年金・生活防衛資金</h2>
+        <div className="form-grid">
+          <Field label="世帯主の手取り年金" hint="月額。0円も指定可能。初期値は簡易推計。">
+            <NumInput value={pensionM} onChange={v => set({ pensionMonthly: v })} suffix="万円/月" step={0.1} />
+            <button type="button" className="text-xs text-accent-blue mt-1" onClick={() => set({ pensionMonthly: null })}>簡易推計に戻す</button>
+          </Field>
+          {b.spouseEnabled && <Field label="配偶者の手取り年金">
+            <NumInput value={spPensionM} onChange={v => set({ spousePensionMonthly: v })} suffix="万円/月" step={0.1} />
+            <button type="button" className="text-xs text-accent-blue mt-1" onClick={() => set({ spousePensionMonthly: null })}>簡易推計に戻す</button>
+          </Field>}
+          <Field label="生活防衛資金の目標"><NumInput value={b.emergencyFundMonths} onChange={v => set({ emergencyFundMonths: v })} suffix="か月分" step={1} max={36} /></Field>
+        </div>
+        <p className="plan-note">年金・退職金は税金や社会保険料を差し引いた受取額。簡易年金は現在年収・22歳就業の仮定による概算額の90%です。在職年金調整は自動計算しません。ねんきん定期便等を優先してください。</p>
+      </section>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* 世帯主 */}
         <Card title="🧑 世帯主">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="年収（額面）"><NumInput value={b.income} onChange={v => set({ income: v })} suffix="万円" /></Field>
+            <Field label="年収（額面・賞与を除く）"><NumInput value={b.income} onChange={v => set({ income: v })} suffix="万円" /></Field>
             <Field label="年間ボーナス"><NumInput value={b.annualBonusInc} onChange={v => set({ annualBonusInc: v })} suffix="万円" /></Field>
             <Field label="現在年齢"><NumInput value={b.age} onChange={v => set({ age: v })} suffix="歳" /></Field>
             <Field label="定年年齢"><NumInput value={b.retireAge} onChange={v => set({ retireAge: v })} suffix="歳" /></Field>
             <Field label="定年退職金"><NumInput value={b.retireBonus} onChange={v => set({ retireBonus: v })} suffix="万円" /></Field>
             <Field label="現在の貯蓄額"><NumInput value={b.savings} onChange={v => set({ savings: v })} suffix="万円" /></Field>
+            <Field label="手取り率" hint="給与・賞与から税金と社会保険料を引いた割合"><NumInput value={b.takeHomePct} onChange={v => set({ takeHomePct: v })} suffix="%" step={1} max={100} /></Field>
           </div>
           <div className="h-4" />
           <SalaryModeBlock
@@ -120,12 +137,13 @@ export default function BasicInfo({ data, update }: { data: SimData; update: (p:
           {b.spouseEnabled ? (
             <>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="年収（額面）"><NumInput value={b.spouseIncome} onChange={v => set({ spouseIncome: v })} suffix="万円" /></Field>
+                <Field label="年収（額面・賞与を除く）"><NumInput value={b.spouseIncome} onChange={v => set({ spouseIncome: v })} suffix="万円" /></Field>
                 <Field label="年間ボーナス"><NumInput value={b.spouseAnnualBonusInc} onChange={v => set({ spouseAnnualBonusInc: v })} suffix="万円" /></Field>
                 <Field label="現在年齢"><NumInput value={b.spouseAge} onChange={v => set({ spouseAge: v })} suffix="歳" /></Field>
                 <Field label="定年年齢"><NumInput value={b.spouseRetireAge} onChange={v => set({ spouseRetireAge: v })} suffix="歳" /></Field>
                 <Field label="定年退職金"><NumInput value={b.spouseRetireBonus} onChange={v => set({ spouseRetireBonus: v })} suffix="万円" /></Field>
                 <Field label="現在の貯蓄額"><NumInput value={b.spouseSavings ?? 0} onChange={v => set({ spouseSavings: v })} suffix="万円" /></Field>
+                <Field label="手取り率"><NumInput value={b.spouseTakeHomePct} onChange={v => set({ spouseTakeHomePct: v })} suffix="%" step={1} max={100} /></Field>
               </div>
               <div className="h-4" />
               <SalaryModeBlock
@@ -308,7 +326,7 @@ export default function BasicInfo({ data, update }: { data: SimData; update: (p:
             <div className="bg-gradient-to-br from-status-ok/15 to-status-ok/5 border border-status-ok/20 rounded-[10px] p-4">
               <div className="text-[11px] text-ink-label">💰 世帯貯蓄合計</div>
               <div className="text-2xl font-bold tabular text-status-ok mt-0.5">
-                {fmtMan(b.savings + (b.spouseSavings ?? 0))} <span className="text-sm font-normal text-ink-sub">万円</span>
+                {fmtMan(b.savings + (b.spouseEnabled ? b.spouseSavings : 0))} <span className="text-sm font-normal text-ink-sub">万円</span>
               </div>
               <div className="text-[11px] text-ink-sub mt-1">
                 世帯主 <span className="tabular font-semibold text-ink-main">{fmtMan(b.savings)}</span>万
@@ -343,7 +361,7 @@ export default function BasicInfo({ data, update }: { data: SimData; update: (p:
       <Card title="📈 給与推移（5年ごと）">
         <Section title={
           b.salaryAuto
-            ? `自動: 昇給率 ${b.incomeGrowth}%/年・現実カーブ（〜50ピーク / 55-59 −3%/年 / 60再雇用 ×0.65 / 61〜 −1%/年）`
+            ? `自動: 昇給率 ${b.incomeGrowth}%/年・仮定カーブ（〜50ピーク / 55-59 −3%/年 / 60再雇用 ×0.65 / 61〜 −1%/年）`
             : '手動: 各5年ごとの年収を直接入力'
         }>
           <div className="overflow-x-auto mt-3 rounded-[10px] border border-line-card">

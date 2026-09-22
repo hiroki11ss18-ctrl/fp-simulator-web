@@ -13,11 +13,12 @@ export interface CustomerRow {
 const LS_KEY = 'fp-sim:customers';
 
 function readLocal(): CustomerRow[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch { return []; }
+  const raw = localStorage.getItem(LS_KEY);
+  if (!raw) return [];
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every(r => r && typeof r.id === 'string' && typeof r.name === 'string' && r.data && typeof r.data === 'object'))
+    throw new Error('顧客データの形式を確認してください。');
+  return parsed;
 }
 
 function writeLocal(rows: CustomerRow[]) {
@@ -27,19 +28,25 @@ function writeLocal(rows: CustomerRow[]) {
 export function useCustomer() {
   const [list, setList] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    if (supabaseEnabled && supabase) {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('*')
-        .order('updated_at', { ascending: false });
-      if (!error && data) setList(data as CustomerRow[]);
-    } else {
-      setList(readLocal());
-    }
-    setLoading(false);
+    try {
+      if (supabaseEnabled && supabase) {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .order('updated_at', { ascending: false });
+        if (error) throw error;
+        if (data) setList(data as CustomerRow[]);
+      } else {
+        setList(readLocal());
+      }
+      setErrorMessage('');
+    } catch {
+      setErrorMessage('顧客一覧を読み込めません。保存済みデータは上書きしていません。入力データをファイルに保存し、保存先をご確認ください。');
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -93,7 +100,8 @@ export function useCustomer() {
 
   const remove = useCallback(async (id: string) => {
     if (supabaseEnabled && supabase) {
-      await supabase.from('customers').delete().eq('id', id);
+      const { error } = await supabase.from('customers').delete().eq('id', id);
+      if (error) throw error;
       await refresh();
     } else {
       const rows = readLocal().filter(r => r.id !== id);
@@ -102,7 +110,7 @@ export function useCustomer() {
     }
   }, [refresh]);
 
-  return { list, loading, refresh, save, remove, supabaseEnabled };
+  return { list, loading, errorMessage, refresh, save, remove, supabaseEnabled };
 }
 
 export { DEFAULT_DATA };

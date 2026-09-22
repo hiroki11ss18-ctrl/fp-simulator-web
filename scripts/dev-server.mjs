@@ -21,7 +21,13 @@ if (!Number.isInteger(port) || port <= 0) {
 
 const server = await createServer({
   configFile: false,
+  envDir: process.argv.includes('--isolated') ? false : undefined,
+  define: process.argv.includes('--isolated') ? {
+    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(''),
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(''),
+  } : undefined,
   plugins: [react()],
+  optimizeDeps: { entries: ['index.html'] },
   server: {
     host,
     port,

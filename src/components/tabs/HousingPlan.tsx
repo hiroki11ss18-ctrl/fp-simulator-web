@@ -4,6 +4,7 @@ import {
   BUILDING_ASSESSMENT_RATIO,
   LAND_ASSESSMENT_RATIO,
   calcMaxLoan,
+  lookupManualSalary,
 } from '../../hooks/useCalculations';
 import { fmtMan, fmt } from '../../lib/format';
 
@@ -17,9 +18,9 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
   const setHH = (patch: Partial<SimData['household']>) => update({ household: { ...hh, ...patch } });
 
   // 諸費用・総費用・借入予定額（総費用−頭金）
-  const miscAmt = h.miscMode === '100' ? h.building : Math.round(h.building * h.miscPct / 100);
-  const totalCost = h.land + h.building + h.fuka + h.exterior + miscAmt;
-  const netLoan = Math.max(0, totalCost - h.down);
+  const miscAmt = _calc.miscAmt;
+  const totalCost = _calc.totalCost;
+  const netLoan = _calc.loanAuto;
 
   // 審査基準（単独・ペアローン共通）
   const reviewRate = h.reviewRate ?? 3;
@@ -29,10 +30,12 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
     .map(value => ({ value, label: `${value}%` }));
 
   // 世帯年収（参考表示用・ボーナス込み）
-  const householdAnnual = b.income + b.annualBonusInc + (b.spouseEnabled ? b.spouseIncome + b.spouseAnnualBonusInc : 0);
+  const mainAnnual = b.age >= b.retireAge ? 0 : (b.salaryAuto ? b.income : lookupManualSalary(b.salaryManual, b.age)) + b.annualBonusInc;
+  const spouseAnnual = !b.spouseEnabled || b.spouseAge >= b.spouseRetireAge ? 0 : (b.salSpouseAuto ? b.spouseIncome : lookupManualSalary(b.spouseSalaryManual, b.spouseAge)) + b.spouseAnnualBonusInc;
+  const householdAnnual = mainAnnual + spouseAnnual;
   // 借入審査に使う年収（単独=世帯主のみ / ペアローン=世帯合算）
   const isPair = b.loanBorrowType === 'pair' && b.spouseEnabled;
-  const loanIncome = isPair ? householdAnnual : (b.income + b.annualBonusInc);
+  const loanIncome = isPair ? householdAnnual : mainAnnual;
 
   // 他ローンの年返済（最大借入額からこの分を差し引く）
   const otherLoanAnnual = hh.otherLoan * 12;
@@ -88,7 +91,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
           <Card title="資金計画">
             <div className="grid grid-cols-2 gap-4">
               <Field label="💰 頭金（自己資金）"><NumInput value={h.down} onChange={v => set({ down: v })} suffix="万円" /></Field>
-              <Field label="📅 返済期間"><NumInput value={l.years} onChange={v => setLoan({ years: v })} suffix="年" /></Field>
+              <Field label="📅 返済期間"><NumInput value={l.years} onChange={v => setLoan({ years: Math.round(v) })} suffix="年" min={1} max={60} step={1} /></Field>
             </div>
             <p className="text-xs text-ink-sub mt-3">※ 実借入額の調整は「ローン計画」シートで行います。</p>
           </Card>
@@ -126,7 +129,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
                   {fmtMan(totalCost)} <span className="text-base font-normal text-ink-sub">万円</span>
                 </div>
                 <div className="text-[11px] text-ink-sub mt-1">
-                  土地・建物・付帯・外構・諸費用の合計
+                  土地・建物・付帯・外構・諸費用・別途設備費の合計
                 </div>
               </div>
 
@@ -135,13 +138,13 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
                 <Row label="▲ 頭金（自己資金）" value={`-${fmtMan(h.down)}`} negative />
               </div>
               <div className="bg-status-ok/8 border border-status-ok/30 rounded-[8px] p-3 mt-2">
-                <div className="text-[11px] text-ink-label mb-0.5">借入予定額（総費用 − 頭金）</div>
+                <div className="text-[11px] text-ink-label mb-0.5">借入予定額（現金払い設備を除く費用 − 頭金）</div>
                 <div className="text-2xl font-bold tabular text-status-ok">
                   {fmtMan(netLoan)} <span className="text-sm font-normal text-ink-sub">万円</span>
                 </div>
                 {h.down > 0 && (
                   <div className="text-[11px] text-ink-sub mt-1">
-                    総費用 {fmtMan(totalCost)}万 − 頭金 {fmtMan(h.down)}万 = {fmtMan(netLoan)}万
+                    実借入 {_calc.loan.toLocaleString()}万円 / 現金支出 {fmtMan(_calc.cashRequired)}万円 / 購入直後残高 {fmtMan(_calc.initialCash)}万円
                   </div>
                 )}
               </div>
@@ -185,6 +188,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
               </div>
             </div>
 
+            <p className="plan-note">年収・審査金利・比率から逆算した目安で、融資承認や返済の安全性を保証するものではありません。実際の返済金利はローン計画で別に設定します。</p>
             {/* 他ローン控除の内訳 */}
             {hh.otherLoan > 0 && (
               <div className="mt-3 text-xs space-y-1 bg-bg-card border border-line-table rounded-[8px] p-3">
