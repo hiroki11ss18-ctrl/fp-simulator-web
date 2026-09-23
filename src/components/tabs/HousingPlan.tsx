@@ -1,8 +1,7 @@
 import { Card, Field, NumInput, Select, Section } from '../ui';
 import type { SimData, CalcResult } from '../../types';
 import {
-  BUILDING_ASSESSMENT_RATIO,
-  LAND_ASSESSMENT_RATIO,
+  calcPropertyTax,
   calcMaxLoan,
   lookupManualSalary,
 } from '../../hooks/useCalculations';
@@ -46,9 +45,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
   const maxLoanNoOther = calcMaxLoan(loanIncome, reviewRatio, reviewRate, l.years, 0);
   const reducedBy = Math.max(0, maxLoanNoOther - maxLoan);
 
-  // 自動評価額（建物本体価格・土地代ベース）
-  const buildValAuto = Math.round(h.building * BUILDING_ASSESSMENT_RATIO);
-  const landValAuto = Math.round(h.land * LAND_ASSESSMENT_RATIO);
+  const pt = calcPropertyTax(h, l);
 
   return (
     <div className="space-y-4">
@@ -216,29 +213,31 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
 
       <Card title="🏛 固定資産税（評価額設定）">
         <p className="text-xs text-ink-sub mb-4">
-          建坪・土地面積から評価額を自動算出します。長期優良の軽減期間は「ローン計画」で設定。
+          自動評価額は「面積 × 評価単価」の概算です。単価は建築費の坪単価ではなく、固定資産税用の仮評価額です。
         </p>
 
         {/* 面積入力 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-          <div className="bg-bg-panel border border-line-table rounded-[10px] p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xl">📐</span>
-              <span className="text-sm font-bold text-ink-main">建坪</span>
-            </div>
-            <NumInput value={h.buildArea} onChange={v => set({ buildArea: v })} suffix="坪" step={0.5} />
+          <div className="space-y-3">
+            <Field label="建物の延床面積（各階の合計）">
+              <NumInput value={h.buildArea} onChange={v => set({ buildArea: v })} suffix="坪" step={0.5} />
+            </Field>
+            <Field label="建物の評価単価（仮定）">
+              <NumInput value={Number(h.propTaxBuildingUnitValue.toFixed(4))} onChange={v => set({ propTaxBuildingUnitValue: v })} suffix="万円/坪" step={0.1} />
+            </Field>
             <div className="text-[11px] text-ink-sub mt-2">
-              新築軽減は住宅部分120㎡相当まで。建物評価額の按分に使います。
+              延床面積 {fmt(pt.buildAreaM2, 2)}㎡。新築軽減は住宅部分120㎡相当まで。
             </div>
           </div>
-          <div className="bg-bg-panel border border-line-table rounded-[10px] p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-xl">🌍</span>
-              <span className="text-sm font-bold text-ink-main">土地面積</span>
-            </div>
-            <NumInput value={h.landArea} onChange={v => set({ landArea: v })} suffix="坪" step={0.5} />
+          <div className="space-y-3">
+            <Field label="土地面積">
+              <NumInput value={h.landArea} onChange={v => set({ landArea: v })} suffix="坪" step={0.5} />
+            </Field>
+            <Field label="土地の評価単価（仮定）">
+              <NumInput value={Number(h.propTaxLandUnitValue.toFixed(4))} onChange={v => set({ propTaxLandUnitValue: v })} suffix="万円/坪" step={0.1} />
+            </Field>
             <div className="text-[11px] text-ink-sub mt-2">
-              200㎡まで小規模住宅用地、超過分は一般住宅用地として按分します。
+              土地面積 {fmt(pt.landAreaM2, 2)}㎡。200㎡まで小規模住宅用地、超過分は一般住宅用地として按分。
             </div>
           </div>
         </div>
@@ -248,25 +247,27 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
           <AssessmentField
             icon="🏠"
             label="建物評価額"
-            autoValue={buildValAuto}
+            autoValue={pt.buildAuto}
             current={h.propTaxBuildingValue}
             onChange={v => set({ propTaxBuildingValue: v })}
-            formulaNote={`建物本体 ${fmtMan(h.building)}万円 × ${Math.round(BUILDING_ASSESSMENT_RATIO * 100)}%`}
+            formulaNote={`${fmt(h.buildArea, 2)}坪 × 約${fmt(h.propTaxBuildingUnitValue, 4)}万円/坪`}
           />
           <AssessmentField
             icon="🟫"
             label="土地評価額"
-            autoValue={landValAuto}
+            autoValue={pt.landAuto}
             current={h.propTaxLandValue}
             onChange={v => set({ propTaxLandValue: v })}
-            formulaNote={`土地代 ${fmtMan(h.land)}万円 × ${Math.round(LAND_ASSESSMENT_RATIO * 100)}%`}
+            formulaNote={`${fmt(h.landArea, 2)}坪 × 約${fmt(h.propTaxLandUnitValue, 4)}万円/坪`}
           />
         </div>
 
-        <div className="mt-4 bg-accent-blue/5 border border-accent-blue/20 rounded-[8px] p-3 text-xs text-ink-sub leading-relaxed">
-          💬 <strong>参考（出雲市概算）:</strong> 建物3,000万・土地1,000万・35坪・60坪の場合、軽減中 約13万円/年、軽減終了後 約23万円/年。<br />
-          実際の評価額は市の家屋調査・土地評価で決まります。納税通知書や資産税課の確認額がある場合は、手動入力に切り替えてください。
-        </div>
+        <dl className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5 border-t border-line-card pt-4" aria-label="固定資産税等の年額" aria-live="polite">
+          <div><dt className="text-xs text-ink-sub">新築軽減中（{pt.reductionYears}年間）・年額</dt><dd className="text-2xl font-bold tabular">{fmt(pt.during, 2)} <span className="text-xs font-normal">万円/年</span></dd><p className="text-xs text-ink-sub">建物 {fmt(pt.buildDuring, 2)} + 土地 {fmt(pt.landAnnual, 2)} 万円</p></div>
+          <div><dt className="text-xs text-ink-sub">軽減終了後・年額</dt><dd className="text-2xl font-bold tabular">{fmt(pt.after, 2)} <span className="text-xs font-normal">万円/年</span></dd><p className="text-xs text-ink-sub">建物 {fmt(pt.buildAfter, 2)} + 土地 {fmt(pt.landAnnual, 2)} 万円</p></div>
+        </dl>
+        <p className="plan-note">出雲市の固定資産税1.5%{h.cityPlanningTaxEnabled ? '・都市計画税0.075%を含む' : '・都市計画税は含まない'}概算。単価の初期値（建物38万円/坪・土地11万円/坪）は市の公表値ではありません。以前の保存データは従来の評価額を面積で割った単価を引き継ぎます。建物代・土地代とは別の前提です。</p>
+        <p className="plan-note">実際の評価額は市の調査で決まります。手動評価額は面積を変えても固定され、面積による軽減割合のみ変わります。新築軽減の要件・期間や評価替えは個別確認が必要です。</p>
       </Card>
     </div>
   );
@@ -296,11 +297,11 @@ function AssessmentField({ icon, label, autoValue, current, onChange, formulaNot
   const displayValue = isManual ? (current as number) : autoValue;
 
   const setAuto = () => onChange(null);
-  const setManual = () => onChange(autoValue); // 手動切替時は自動値で初期化
+  const setManual = () => { if (!isManual) onChange(autoValue); };
 
   return (
-    <div className="bg-bg-panel border border-line-table rounded-[10px] p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="border-t border-line-table pt-4">
+      <div className="flex flex-wrap gap-2 items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-xl">{icon}</span>
           <span className="text-sm font-bold text-ink-main">{label}</span>
@@ -309,18 +310,22 @@ function AssessmentField({ icon, label, autoValue, current, onChange, formulaNot
           <button
             type="button"
             onClick={setAuto}
+            aria-pressed={!isManual}
+            aria-label={`${label}を自動計算`}
             className={`px-3 py-1 text-xs font-medium transition-colors ${!isManual ? 'bg-accent-blue text-white' : 'text-ink-sub hover:bg-bg-panel'}`}
           >🔗 自動反映</button>
           <button
             type="button"
             onClick={setManual}
+            aria-pressed={isManual}
+            aria-label={`${label}を手動入力`}
             className={`px-3 py-1 text-xs font-medium transition-colors ${isManual ? 'bg-accent-blue text-white' : 'text-ink-sub hover:bg-bg-panel'}`}
           >✍ 手動入力</button>
         </div>
       </div>
 
       {isManual ? (
-        <NumInput value={displayValue} onChange={v => onChange(v)} suffix="万円" />
+        <Field label={`${label}（手動）`}><NumInput value={displayValue} onChange={v => onChange(v)} suffix="万円" /></Field>
       ) : (
         <div className="px-3 py-2 bg-bg-card border border-dashed border-line-card rounded-[8px] tabular text-right text-ink-main">
           {fmtMan(displayValue)} <span className="text-xs text-ink-sub font-normal">万円</span>
@@ -328,7 +333,7 @@ function AssessmentField({ icon, label, autoValue, current, onChange, formulaNot
       )}
 
       <div className="text-[11px] text-ink-sub mt-2 flex items-center gap-1.5">
-        <span>{isManual ? '✍ 任意の評価額で計算' : `🔗 ${formulaNote}（自動: ${fmtMan(autoValue)}万円）`}</span>
+        <span>{isManual ? '手動の評価額を固定。面積・単価による自動変更はしません。' : `${formulaNote}（自動: ${fmtMan(autoValue)}万円）`}</span>
       </div>
     </div>
   );

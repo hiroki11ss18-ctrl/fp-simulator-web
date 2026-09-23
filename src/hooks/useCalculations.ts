@@ -5,6 +5,7 @@ import { energyYear, solarInitialCost, solarMaintenance, clamp } from '../lib/en
 import { calcEdu, eduAnnualByAge, childrenOf, childEducation } from '../lib/education';
 import { occursInYear } from '../lib/suddenExpenses';
 import { loanSchedule } from '../lib/loans';
+import { propertyAssessment } from '../lib/propertyAssessment';
 export { solarMonthlyGenArr } from '../lib/energy';
 
 // ─── 月返済額（元利均等）───
@@ -65,14 +66,9 @@ export function calcTaxDeduction(loanMan: number, rate: number, years: number, h
 //   建物: 新築軽減は固定資産税部分のみ1/2、120㎡相当分まで
 //   土地: 200㎡まで小規模住宅用地、200㎡超は一般住宅用地として按分
 // 評価額の自動算出:
-//   建物 = 建物本体価格 × 45%（家屋評価の概算。価格未入力時は建坪×38万円）
-//   土地 = 土地代 × 70%（価格未入力時は土地坪×11万円）
+//   建物 = 延床面積（坪）× 仮評価単価、土地 = 土地面積（坪）× 仮評価単価
 export const IZUMO_PROPERTY_TAX_RATE = 0.015;
 export const IZUMO_CITY_PLANNING_TAX_RATE = 0.00075;
-export const BUILDING_ASSESSMENT_RATIO = 0.45;
-export const LAND_ASSESSMENT_RATIO = 0.70;
-export const BUILD_EVAL_PER_TSUBO_FALLBACK = 38; // 万円/坪
-export const LAND_EVAL_PER_TSUBO_FALLBACK = 11;  // 万円/坪
 export const TSUBO_TO_M2 = 3.305785;
 export const NEW_HOME_REDUCTION_CAP_M2 = 120;
 export const SMALL_RESIDENTIAL_LAND_CAP_M2 = 200;
@@ -81,12 +77,7 @@ export function calcPropertyTax(housing: SimData['housing'], loan: SimData['loan
   const landArea = housing.landArea ?? 0;
   const buildAreaM2 = buildArea * TSUBO_TO_M2;
   const landAreaM2 = landArea * TSUBO_TO_M2;
-  const buildAuto = housing.building > 0
-    ? Math.round(housing.building * BUILDING_ASSESSMENT_RATIO)
-    : Math.round(buildArea * BUILD_EVAL_PER_TSUBO_FALLBACK);
-  const landAuto = housing.land > 0
-    ? Math.round(housing.land * LAND_ASSESSMENT_RATIO)
-    : Math.round(landArea * LAND_EVAL_PER_TSUBO_FALLBACK);
+  const { buildAuto, landAuto } = propertyAssessment(housing);
   const buildVal = housing.propTaxBuildingValue !== null ? housing.propTaxBuildingValue : buildAuto;
   const landVal  = housing.propTaxLandValue  !== null ? housing.propTaxLandValue  : landAuto;
   const reductionYears = loan.isLongTermHouse ? 5 : 3;

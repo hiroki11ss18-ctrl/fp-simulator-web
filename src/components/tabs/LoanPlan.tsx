@@ -93,7 +93,7 @@ export default function LoanPlan({ data, update, calc }: { data: SimData; update
       <h2>固定資産税・都市計画税</h2>
       <div className="mb-4"><Toggle checked={h.cityPlanningTaxEnabled} onChange={cityPlanningTaxEnabled => update({ housing: { ...h, cityPlanningTaxEnabled } })} label="都市計画税の対象区域" /></div>
       <Toggle checked={l.isLongTermHouse} onChange={isLongTermHouse => set({ isLongTermHouse })} label="新築住宅の固定資産税軽減を5年間で計算（認定長期優良住宅）" />
-      <div className="metric-grid mt-4"><div className="metric"><span>新築軽減中・年額</span><strong>{fmt(pt.during, 1)}<small>万円</small></strong></div><div className="metric"><span>軽減終了後・年額</span><strong>{fmt(pt.after, 1)}<small>万円</small></strong></div></div>
+      <div className="metric-grid mt-4"><div className="metric"><span>新築軽減中・年額</span><strong>{fmt(pt.during, 2)}<small>万円</small></strong></div><div className="metric"><span>軽減終了後・年額</span><strong>{fmt(pt.after, 2)}<small>万円</small></strong></div></div>
       <p className="plan-note">出雲市の固定資産税1.5%、都市計画税0.075%（区域設定による）。一般住宅3年・認定長期優良住宅5年、住宅部分120㎡までの建物固定資産税を半額とする概算。土地は住宅用地特例を面積按分。評価額は住宅資金計画で設定します。評価替え・経年減価は未反映です。</p>
     </section>
   </div>;

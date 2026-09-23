@@ -1,5 +1,7 @@
 import { DEFAULT_DATA } from './defaults';
 import type { SimData } from '../types';
+import { legacyAssessment, BUILDING_ASSESSMENT_RATIO, LAND_ASSESSMENT_RATIO,
+  BUILD_EVAL_PER_TSUBO_FALLBACK, LAND_EVAL_PER_TSUBO_FALLBACK } from './propertyAssessment';
 
 export function mergeWithDefaults<T>(defaults: T, override: unknown): T {
   if (override === undefined) return structuredClone(defaults);
@@ -18,6 +20,21 @@ export function mergeWithDefaults<T>(defaults: T, override: unknown): T {
 
 export function normalizeData(raw: unknown): SimData {
   const d = mergeWithDefaults(DEFAULT_DATA, raw);
+  const oldHousing = raw && typeof raw === 'object' ? (raw as Partial<SimData>).housing : undefined;
+  // Anchor older price-based estimates to their saved areas without changing the loaded tax.
+  if (oldHousing && typeof oldHousing === 'object') {
+    const h = d.housing;
+    if (oldHousing.propTaxBuildingUnitValue === undefined) {
+      const value = legacyAssessment(h.building, BUILDING_ASSESSMENT_RATIO, h.buildArea, BUILD_EVAL_PER_TSUBO_FALLBACK);
+      if (h.buildArea > 0) h.propTaxBuildingUnitValue = value / h.buildArea;
+      else if (h.propTaxBuildingValue === null) h.propTaxBuildingValue = value;
+    }
+    if (oldHousing.propTaxLandUnitValue === undefined) {
+      const value = legacyAssessment(h.land, LAND_ASSESSMENT_RATIO, h.landArea, LAND_EVAL_PER_TSUBO_FALLBACK);
+      if (h.landArea > 0) h.propTaxLandUnitValue = value / h.landArea;
+      else if (h.propTaxLandValue === null) h.propTaxLandValue = value;
+    }
+  }
   const legacySolar = raw && typeof raw === 'object' ? (raw as Partial<SimData>).solar : undefined;
   if (legacySolar && legacySolar.fitStepYears === undefined) d.solar.fitStepYears = d.solar.fitYears;
   const templateExpense = { id: '', name: '', amount: 0, cycleYears: 1, firstYear: 1, endYear: 60, once: false };

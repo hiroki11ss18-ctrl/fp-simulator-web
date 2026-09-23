@@ -46,6 +46,7 @@ export const DEFAULT_DATA: SimData = {
     miscMode: 'pct', miscPct: 7,
     down: 300, repRatio: 35, reviewRate: 3, actualLoan: 0,
     buildArea: 35, landArea: 60,
+    propTaxBuildingUnitValue: 38, propTaxLandUnitValue: 11,
     propTaxBuildingValue: null, propTaxLandValue: null, cityPlanningTaxEnabled: true,
   },
   loan: {

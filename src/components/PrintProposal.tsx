@@ -5,12 +5,13 @@ import { buildOverview, REVIEW_LABELS } from '../lib/planning';
 import { PROPOSAL_STYLES } from '../lib/proposalStyles';
 import { ENERGY_SOURCE } from '../lib/energy';
 import { EDUCATION_SOURCE, childrenOf } from '../lib/education';
-import { lookupManualSalary } from '../hooks/useCalculations';
+import { lookupManualSalary, calcPropertyTax } from '../hooks/useCalculations';
 import { HorizonTable, MoneyBridge, MonthlyBudget, BalancePlot, AnnualTable, AssumptionText } from './PlanResults';
 
 const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResult }>(({ data, calc }, ref) => {
   const view = useMemo(() => buildOverview(data, calc), [data, calc]);
   const b = data.basic, l = data.loan, s = data.solar;
+  const h = data.housing, pt = calcPropertyTax(h, l);
   const rates = l.loanType === 'fix' ? [l.fixRate1, l.fixRate2, l.fixRate3] : [l.varRate1, l.varRate2, l.varRate3];
   const periods = l.loanType === 'fix' ? [l.fixPeriod1, l.fixPeriod2] : [l.varPeriod1, l.varPeriod2];
   const chunks = [0, 20, 40].map(start => calc.rows.slice(start, start + 20));
@@ -28,6 +29,8 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
     ['賞与返済・繰上返済', fmt(l.bonusAmount) + '万円×年' + l.bonusTimes + '回 / ' + l.pyear + '年目' + fmt(l.pamount) + '万円・' + l.pyear2 + '年目' + fmt(l.pamount2) + '万円（' + l.ptype + '）'],
     ['他ローン', '残高 ' + fmt(data.household.otherLoanBalance) + '万円 / 月' + fmt(data.household.otherLoan, 1) + '万円 / 年利' + data.household.otherLoanRate + '% / 残高不明時' + data.household.otherLoanMonths + 'か月'],
     ['住宅ローン控除', l.taxInclude ? '確認上限で計上 / 主 ' + l.taxAnnualCap + '万円・配偶者 ' + l.taxSpouseAnnualCap + '万円/年' : '資金計画に含めない'],
+    ['固定資産税の仮評価額', `建物 ${fmt(pt.buildVal)}万円（${h.propTaxBuildingValue === null ? `${h.buildArea}坪×約${fmt(h.propTaxBuildingUnitValue, 4)}万円/坪` : '手動'}） / 土地 ${fmt(pt.landVal)}万円（${h.propTaxLandValue === null ? `${h.landArea}坪×約${fmt(h.propTaxLandUnitValue, 4)}万円/坪` : '手動'}）`],
+    ['固定資産税等・年額', `軽減${pt.reductionYears}年間 ${fmt(pt.during, 2)}万円 / 以後 ${fmt(pt.after, 2)}万円（都市計画税${h.cityPlanningTaxEnabled ? '含む' : 'なし'}・評価替え未反映）`],
     ['物価上昇率', data.household.inflationRate + '%/年（対象費用に複利適用）'],
     ['太陽光・蓄電池', s.enabled ? s.solarKw + 'kW / 蓄電池 ' + (s.battEnabled ? s.battCapacity + 'kWh' : 'なし') : 'なし'],
     ['設備費の扱い', ({ included: '建物等の見積に含む', cash: '別途現金', loan: '別途住宅ローン' })[s.funding] + ' / ' + fmt(calc.solarInitial) + '万円'],

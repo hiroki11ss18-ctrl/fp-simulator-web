@@ -14,6 +14,7 @@ const { normalizeData } = await server.ssrLoadModule('/src/lib/data.ts');
 const { buildOverview, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
 const { occursInYear } = await server.ssrLoadModule('/src/lib/suddenExpenses.ts');
 const { default: PrintProposal } = await server.ssrLoadModule('/src/components/PrintProposal.tsx');
+const { default: HousingPlan } = await server.ssrLoadModule('/src/components/tabs/HousingPlan.tsx');
 const { PROPOSAL_STYLES } = await server.ssrLoadModule('/src/lib/proposalStyles.ts');
 const fresh = () => { const d = structuredClone(DEFAULT_DATA); d.basic.date = '2026-09-22'; return d; };
 const near = (a, b, epsilon = 1e-6) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
@@ -244,6 +245,91 @@ test('property tax changes after relief years and respects 120m2/200m2 apportion
   near(c.rows[4].propTax, pt.during); near(c.rows[5].propTax, pt.after); assert.ok(pt.after > pt.during);
   d.housing.buildArea = 60; const large = calcPropertyTax(d.housing, d.loan);
   assert.ok(large.normalBuildVal > 0); near(large.reducedBuildVal + large.normalBuildVal, large.buildVal);
+});
+
+test('building and land area affect automatic tax even below the relief area caps', () => {
+  const d = fresh(); Object.assign(d.housing, { buildArea: 30, landArea: 50 });
+  const initial = calcPropertyTax(d.housing, d.loan);
+  near(initial.buildAuto, 1140); near(initial.landAuto, 550);
+  near(initial.during, 1140 * 0.00825 + 550 * 0.00275);
+  d.housing.buildArea = 35;
+  const building = calcPropertyTax(d.housing, d.loan);
+  near(building.during - initial.during, 5 * 38 * 0.00825);
+  near(building.after - initial.after, 5 * 38 * 0.01575);
+  d.housing.landArea = 60;
+  const land = calcPropertyTax(d.housing, d.loan);
+  near(land.during - building.during, 10 * 11 * 0.00275);
+  near(land.after - building.after, 10 * 11 * 0.00275);
+});
+
+test('unit values and zero area are respected without purchase-price overrides', () => {
+  const d = fresh(); Object.assign(d.housing, { propTaxBuildingUnitValue: 40, propTaxLandUnitValue: 15 });
+  const pt = calcPropertyTax(d.housing, d.loan); near(pt.buildAuto, 1400); near(pt.landAuto, 900);
+  d.housing.building = 9999; d.housing.land = 9999;
+  assert.deepEqual(calcPropertyTax(d.housing, d.loan), pt);
+  d.housing.buildArea = 0; d.housing.landArea = 0;
+  near(calcPropertyTax(d.housing, d.loan).during, 0);
+  d.housing.buildArea = 35; d.housing.landArea = 60;
+  d.housing.propTaxBuildingUnitValue = 0; d.housing.propTaxLandUnitValue = 0;
+  const restored = normalizeData(d); near(calcPropertyTax(restored.housing, restored.loan).after, 0);
+});
+
+test('manual assessments stay fixed but area relief still changes', () => {
+  const d = fresh(); Object.assign(d.housing, { propTaxBuildingValue: 1500, propTaxLandValue: 700, buildArea: 30, landArea: 50 });
+  const pt = calcPropertyTax(d.housing, d.loan);
+  Object.assign(d.housing, { buildArea: 35, landArea: 60, propTaxBuildingUnitValue: 100 });
+  const small = calcPropertyTax(d.housing, d.loan);
+  near(small.during, pt.during); near(small.after, pt.after);
+  d.housing.buildArea = 60; const large = calcPropertyTax(d.housing, d.loan);
+  near(large.buildVal, 1500); near(large.buildAfter, pt.buildAfter); assert.ok(large.buildDuring > pt.buildDuring);
+  d.housing.propTaxBuildingValue = 0; near(calcPropertyTax(d.housing, d.loan).buildDuring, 0);
+});
+
+test('legacy price-based saves retain tax and become responsive to later area edits', () => {
+  const d = fresh(); delete d.housing.propTaxBuildingUnitValue; delete d.housing.propTaxLandUnitValue;
+  const restored = normalizeData(d); const pt = calcPropertyTax(restored.housing, restored.loan);
+  near(pt.buildVal, 1350); near(pt.landVal, 700); near(pt.during, 1350 * 0.00825 + 700 * 0.00275);
+  near(pt.after, 1350 * 0.01575 + 700 * 0.00275);
+  restored.housing.buildArea = 36; restored.housing.landArea = 61;
+  const changed = calcPropertyTax(restored.housing, restored.loan); assert.ok(changed.during > pt.during); assert.ok(changed.after > pt.after);
+  assert.deepEqual(normalizeData(JSON.parse(JSON.stringify(restored))), restored);
+});
+
+test('legacy manual, zero-price and zero-area assessments survive migration', () => {
+  const d = fresh(); delete d.housing.propTaxBuildingUnitValue; delete d.housing.propTaxLandUnitValue;
+  d.housing.propTaxBuildingValue = 0; d.housing.propTaxLandValue = 500;
+  let restored = normalizeData(d), pt = calcPropertyTax(restored.housing, restored.loan);
+  near(pt.buildVal, 0); near(pt.landVal, 500);
+  Object.assign(d.housing, { propTaxBuildingValue: null, propTaxLandValue: null, building: 0, land: 0 });
+  restored = normalizeData(d); pt = calcPropertyTax(restored.housing, restored.loan);
+  near(pt.buildVal, 35 * 38); near(pt.landVal, 60 * 11);
+  Object.assign(d.housing, { building: 3000, land: 1000, buildArea: 0, landArea: 0 });
+  restored = normalizeData(d); near(restored.housing.propTaxBuildingValue, 1350); near(restored.housing.propTaxLandValue, 700);
+});
+
+test('area-based tax handles both relief caps and disabled city planning tax', () => {
+  const d = fresh(); Object.assign(d.housing, { buildArea: 60, landArea: 100, cityPlanningTaxEnabled: false });
+  const pt = calcPropertyTax(d.housing, d.loan);
+  near(pt.buildVal, 2280); near(pt.landVal, 1100);
+  near(pt.buildDuring, (pt.reducedBuildVal * 0.5 + pt.normalBuildVal) * 0.015);
+  near(pt.landAnnual, (pt.smallLandVal / 6 + pt.generalLandVal / 3) * 0.015);
+  near(pt.after, 2280 * 0.015 + pt.landAnnual);
+});
+
+test('area edits reconcile annual ledger, all horizons, housing display and proposal', () => {
+  const d = fresh(), before = calcAll(d), oldTax = calcPropertyTax(d.housing, d.loan);
+  d.housing.buildArea = 45; d.housing.landArea = 80;
+  const after = calcAll(d), pt = calcPropertyTax(d.housing, d.loan);
+  for (const year of [30, 40, 50, 60]) {
+    const taxIncrease = (pt.during - oldTax.during) * 5 + (pt.after - oldTax.after) * (year - 5);
+    near(before.rows[year - 1].balance - after.rows[year - 1].balance, taxIncrease);
+  }
+  const housing = renderToStaticMarkup(createElement(HousingPlan, { data: d, calc: after, update: () => {} }));
+  const proposal = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: after }));
+  assert.ok(housing.includes(pt.during.toFixed(2))); assert.ok(proposal.includes(pt.during.toFixed(2)));
+  assert.ok(housing.includes(pt.after.toFixed(2))); assert.ok(proposal.includes(pt.after.toFixed(2)));
+  near(buildOverview(d, after).monthlyItems.find(item => item.label === '固定資産税等の積立').amount, pt.during / 12);
+  invariant(after);
 });
 test('overview reconciles monthly reserves without spending them twice', () => {
   const d = fresh(); d.suddenExpenses = [{ id: 't', name: '旅行', amount: 24, cycleYears: 1 }];

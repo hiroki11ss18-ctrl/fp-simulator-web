@@ -70,10 +70,12 @@ export interface HousingPlan {
   reviewRate: number;     // 最大借入額の試算に使う審査金利 %
   actualLoan: number;     // 実際の借入額（0=自動）
   // 固定資産税
-  buildArea: number;                   // 建坪（坪）
+  buildArea: number;                   // 建物の延床面積（坪）
   landArea: number;                    // 土地面積（坪）
-  propTaxBuildingValue: number | null; // null=自動（建物本体価格×45%）
-  propTaxLandValue: number | null;     // null=自動（土地代×70%）
+  propTaxBuildingUnitValue: number;     // 建物の仮評価単価 万円/坪
+  propTaxLandUnitValue: number;         // 土地の仮評価単価 万円/坪
+  propTaxBuildingValue: number | null; // null=自動（延床面積×評価単価）
+  propTaxLandValue: number | null;     // null=自動（土地面積×評価単価）
   cityPlanningTaxEnabled: boolean;     // 都市計画税の課税区域か
 }
 
