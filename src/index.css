@@ -238,6 +238,12 @@ button { touch-action: manipulation; }
 .horizon-table { min-width: 710px; }
 .horizon-table th:first-child { width: 190px; }
 .budget-table th { width: 75%; }
+.life-stage-table { table-layout: fixed; }
+.life-stage-table caption { text-align: left; color: #596a74; font-size: 12px; padding-bottom: 12px; }
+.life-stage-table th:first-child { width: 48%; }
+.life-stage-table th,.life-stage-table td { overflow-wrap: anywhere; }
+.life-stage-table thead th:nth-child(2) { border-top: 3px solid #287abe; }
+.life-stage-table thead th:nth-child(3) { border-top: 3px solid #398575; }
 .annual-table { min-width: 930px; font-size: 12px; }
 .annual-table .event-cell { text-align: left; min-width: 190px; max-width: 270px; overflow-wrap: anywhere; }
 .summary-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 4px 0 10px; }
@@ -297,6 +303,10 @@ summary { cursor: pointer; font-size: 13px; color: #33647f; padding: 8px 0; }
   .chart-frame { height: 250px; }
   .budget-table th,.budget-table td { padding: 10px 5px; }
   .budget-table th { width: 66%; }
+  .life-stage-table { font-size: 12px; }
+  .life-stage-table th,.life-stage-table td { padding: 10px 5px; }
+  .life-stage-table th:first-child { width: 42%; }
+  .life-stage-table .strong-row { font-size: 13px; }
   .plan-table .strong-row { font-size: 14px; }
 }
 @media print {

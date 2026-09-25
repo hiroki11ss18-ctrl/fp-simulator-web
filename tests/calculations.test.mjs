@@ -11,10 +11,11 @@ const { DEFAULT_DATA } = await server.ssrLoadModule('/src/lib/defaults.ts');
 const { energyYear, solarMaintenance } = await server.ssrLoadModule('/src/lib/energy.ts');
 const { loanSchedule } = await server.ssrLoadModule('/src/lib/loans.ts');
 const { normalizeData } = await server.ssrLoadModule('/src/lib/data.ts');
-const { buildOverview, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
+const { buildOverview, buildLifeStageExpenses, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
 const { occursInYear } = await server.ssrLoadModule('/src/lib/suddenExpenses.ts');
 const { default: PrintProposal } = await server.ssrLoadModule('/src/components/PrintProposal.tsx');
 const { default: HousingPlan } = await server.ssrLoadModule('/src/components/tabs/HousingPlan.tsx');
+const { default: Summary } = await server.ssrLoadModule('/src/components/tabs/Summary.tsx');
 const { PROPOSAL_STYLES } = await server.ssrLoadModule('/src/lib/proposalStyles.ts');
 const fresh = () => { const d = structuredClone(DEFAULT_DATA); d.basic.date = '2026-09-22'; return d; };
 const near = (a, b, epsilon = 1e-6) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
@@ -346,6 +347,72 @@ test('stress settings do not mutate original customer data', () => {
   const d = fresh(), before = JSON.stringify(d), changed = makeStressData(d);
   assert.equal(JSON.stringify(d), before); assert.ok(changed.basic.income < d.basic.income);
   assert.ok(changed.loan.varRate1 > d.loan.varRate1); assert.ok(changed.household.food > d.household.food);
+});
+
+test('life-stage expense totals reconcile to the unmodified sixty-year ledger', () => {
+  const d = fresh(); d.household.inflationRate = 2;
+  d.household.otherLoan = 2; d.household.otherLoanBalance = 100;
+  d.savingsInsurances = [{ id: 's', name: 's', monthly: 1, payoutYear: 35, payoutAmount: 400 }];
+  d.suddenExpenses = [{ id: 'car', name: 'car', amount: 250, cycleYears: 8 }];
+  const c = calcAll(d), original = JSON.stringify(c), stages = buildLifeStageExpenses(d, c);
+  assert.equal(stages.working.years, 32); assert.equal(stages.retired.years, 28);
+  near(stages.working.total + stages.retired.total, sum(c.rows, 'totalOut'));
+  for (const stage of [stages.working, stages.retired]) {
+    near(stage.amounts.reduce((a, v) => a + v, 0), stage.monthlyTotal);
+    near(stage.monthlyTotal * stage.years * 12, stage.total);
+  }
+  assert.equal(JSON.stringify(c), original);
+  d.simYears = 60; assert.deepEqual(buildLifeStageExpenses(d, calcAll(d)), stages);
+});
+
+test('life-stage boundary follows start-of-year age, not year-end display age', () => {
+  const d = fresh(); Object.assign(d.basic, { age: 64, retireAge: 65 });
+  const c = calcAll(d), s = buildLifeStageExpenses(d, c);
+  assert.equal(s.working.years, 1); assert.equal(s.working.startAge, 64); assert.equal(s.working.endAge, 64);
+  assert.equal(s.retired.startAge, 65); assert.equal(s.retired.firstYear, 2);
+  near(s.working.total, c.rows[0].totalOut); near(s.retired.total, sum(c.rows.slice(1), 'totalOut'));
+});
+
+test('life-stage absent periods remain absent, never fabricated zero-cost stages', () => {
+  const d = fresh(); d.basic.age = 70;
+  let s = buildLifeStageExpenses(d, calcAll(d)); assert.equal(s.working, null); assert.equal(s.retired.years, 60);
+  Object.assign(d.basic, { age: 20, retireAge: 80 });
+  s = buildLifeStageExpenses(d, calcAll(d)); assert.equal(s.retired, null); assert.equal(s.working.years, 60);
+  const html = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: calcAll(d) }));
+  assert.ok(html.includes('対象期間なし')); assert.ok(!html.includes('NaN'));
+});
+
+test('life-stage categories avoid double counting insurance and other loans', () => {
+  const d = fresh(); d.household.otherLoan = 2; d.household.otherLoanMonths = 12;
+  d.savingsInsurances = [{ id: 's', name: 's', monthly: 3, payoutYear: 1, payoutAmount: 36 }];
+  Object.assign(d.basic, { age: 64, retireAge: 65 });
+  const c = calcAll(d), s = buildLifeStageExpenses(d, c);
+  near(s.working.amounts[1], (c.rows[0].living - 24 - 36) / 12);
+  near(s.working.amounts[2], 2); near(s.working.amounts[3], 3);
+  near(s.retired.amounts[2], 0); near(s.retired.amounts[3], 0);
+});
+
+test('summary and proposal show only base results while retaining negative balances', () => {
+  const d = fresh(); d.household.food = 100;
+  const c = calcAll(d); assert.ok(c.rows[29].balance < 0);
+  const props = { data: d, calc: c, onPrint: () => {}, onExport: () => {} };
+  for (const component of [Summary, PrintProposal]) {
+    const html = renderToStaticMarkup(createElement(component, props));
+    for (const removed of ['条件悪化', '比較設定', 'お客様と確認する前提', '前提の確認状況', '前提未確認', '年末残高はプラスです', '資金計画の見直しが必要です'])
+      assert.ok(!html.includes(removed), removed);
+    assert.ok(html.includes('現役中・退職後の支出'));
+    assert.ok(html.includes(c.rows[29].balance.toLocaleString('ja-JP', { maximumFractionDigits: 0 })));
+    assert.ok(html.includes('class="negative"'));
+    assert.equal((html.match(/stroke-dasharray/g) || []).length, 0);
+  }
+});
+
+test('legacy comparison settings and review checkboxes do not affect the new overview', () => {
+  const d = fresh(), c = calcAll(d), before = buildOverview(d, c);
+  Object.assign(d.stress, { rateAdd: 8, incomeDropPct: 99, expenseAddPct: 100 });
+  Object.keys(d.reviewChecks).forEach(key => { d.reviewChecks[key] = true; });
+  assert.deepEqual(buildOverview(d, calcAll(d)), before);
+  near(calcAll(d).rows[59].balance, c.rows[59].balance);
 });
 test('deterministic varied scenarios preserve all accounting identities', () => {
   let seed = 19790212;

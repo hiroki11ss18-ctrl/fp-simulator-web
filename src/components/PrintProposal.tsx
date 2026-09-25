@@ -1,12 +1,12 @@
 import { forwardRef, useMemo } from 'react';
 import type { SimData, CalcResult } from '../types';
 import { fmt } from '../lib/format';
-import { buildOverview, REVIEW_LABELS } from '../lib/planning';
+import { buildOverview } from '../lib/planning';
 import { PROPOSAL_STYLES } from '../lib/proposalStyles';
 import { ENERGY_SOURCE } from '../lib/energy';
 import { EDUCATION_SOURCE, childrenOf } from '../lib/education';
 import { lookupManualSalary, calcPropertyTax } from '../hooks/useCalculations';
-import { HorizonTable, MoneyBridge, MonthlyBudget, BalancePlot, AnnualTable, AssumptionText } from './PlanResults';
+import { HorizonTable, MoneyBridge, MonthlyBudget, BalancePlot, AnnualTable, LifeStageExpenses } from './PlanResults';
 
 const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResult }>(({ data, calc }, ref) => {
   const view = useMemo(() => buildOverview(data, calc), [data, calc]);
@@ -40,22 +40,20 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
   return <div ref={ref} className="fp-proposal">
     <style dangerouslySetInnerHTML={{ __html: PROPOSAL_STYLES }} />
     <section className="proposal-page">
-      <header className="proposal-header"><div><p className="proposal-subtitle">住まいと暮らしの資金計画</p><h1>ライフプラン提案書</h1><p>{b.customerName || 'お客様名未入力'} 様 / 担当 {b.staffName || '未入力'} / {b.date}</p></div><div className="proposal-status">{view.allConfirmed ? '前提確認済み' : '前提未確認・試算'}</div></header>
-      <p><strong>{view.horizonRows[3].low.balance < 0 ? '60年間の途中で資金不足の見込みです。最初の不足は' + (view.horizonRows[3].deficit === 0 ? '購入時点' : view.horizonRows[3].deficit + '年後') + '。資金計画の見直しが必要です。' : '入力条件に基づく試算です。将来の収支を保証するものではありません。'}</strong></p>
+      <header className="proposal-header"><div><p className="proposal-subtitle">住まいと暮らしの資金計画</p><h1>ライフプラン提案書</h1><p>{b.customerName || 'お客様名未入力'} 様 / 担当 {b.staffName || '未入力'} / {b.date}</p></div></header>
       <div className="metric-grid">
         <div className="metric"><span>購入直後の手元資金</span><strong className={calc.initialCash < 0 ? 'negative' : ''}>{fmt(calc.initialCash)}<small>万円</small></strong></div>
         <div className="metric"><span>支払い・積立後の月平均余力</span><strong className={view.monthlySurplus < 0 ? 'negative' : ''}>{fmt(view.monthlySurplus, 2)}<small>万円</small></strong></div>
         <div className="metric"><span>{data.simYears}年後の手元資金</span><strong className={view.selected.balance < 0 ? 'negative' : ''}>{fmt(view.selected.balance)}<small>万円</small></strong></div>
       </div>
       <h2>30・40・50・60年後の見通し</h2><HorizonTable overview={view} />
-      <AssumptionText data={data} />
-      <h2>手元資金の推移</h2><BalancePlot calc={calc} stress={view.stress} />
+      <h2>手元資金の推移</h2><BalancePlot calc={calc} />
       <MoneyBridge calc={calc} years={data.simYears} />
       <p className="plan-note">預貯金として残るお金の試算です。不動産売却価値や未受取の保険積立は含みません。残る借入は別表示。マイナスは資金不足で、追加融資は自動計上しません。年末時点の計算のため、年内の大きな支払いへの備えは別途必要です。</p>
-      <footer className="proposal-footer">金額は万円・表示のみ四捨五入。FPシミュレーター 計算仕様2026.09 / この提案書の条件と確認事項をセットでご確認ください。</footer>
+      <footer className="proposal-footer">金額は万円・表示のみ四捨五入。入力条件に基づく概算で、将来の収支を保証するものではありません。FPシミュレーター 計算仕様2026.09</footer>
     </section>
     <section className="proposal-page">
-      <header className="proposal-header"><h2>毎月の予算と、採用した前提</h2><span>{b.customerName || 'お客様'} 様</span></header>
+      <header className="proposal-header"><h2>購入後1年目の月額予算</h2><span>{b.customerName || 'お客様'} 様</span></header>
       <MonthlyBudget overview={view} />
       <p className="plan-note">初年度の年収・賞与等を12で割った平均で、賞与のない月の収支とは異なります。退職金・控除・満期受取を除外。修繕・旅行・車の積立は{data.simYears}年間の予定総額÷{data.simYears}年÷12。年次残高では積立を重ねて差し引かず、発生年に実際の支出を計上します。繰上返済は年次表で別途確認。生活防衛資金は{b.emergencyFundMonths}か月分・約{fmt(view.emergencyFund)}万円の仮目標です。</p>
       <h2>お子さまの進路</h2>{childrenOf(b).map((k, i) => <p key={i}>第{i + 1}子 {k.age}歳 / 公立小学校・{k.mid}・{k.high}・{k.uni} / 下宿{k.alone}年・仕送り月{b.aloneMonthly}万円</p>)}
@@ -63,20 +61,23 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
       <footer className="proposal-footer">現役期・退職後の費用、旅行・車の買い替え、教育費が実際の希望と合っているかをご確認ください。</footer>
     </section>
     <section className="proposal-page">
+      <header className="proposal-header"><h2>現役中・退職後の支出</h2><span>{b.customerName || 'お客様'} 様</span></header>
+      <LifeStageExpenses overview={view} />
+      <footer className="proposal-footer">支出の期間平均です。年ごとの支払額と手元資金は、後半の年次収支をご参照ください。</footer>
+    </section>
+    <section className="proposal-page">
       <header className="proposal-header"><h2>試算に採用した前提</h2><span>{b.customerName || 'お客様'} 様</span></header>
       <h2>試算条件</h2><dl className="condition-list">{conditionRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
       <footer className="proposal-footer">年金・退職金は手取りで計上。給与は額面から入力した手取り率で概算します。税金・社会保険料の厳密な個別計算は行いません。</footer>
     </section>
     <section className="proposal-page">
-      <header className="proposal-header"><h2>予定支出と確認事項</h2><span>{b.date}</span></header>
+      <header className="proposal-header"><h2>予定支出と計算上の注記</h2><span>{b.date}</span></header>
       <h3>旅行・車・一時支出</h3>
       {data.suddenExpenses.length ? <table className="plan-table"><thead><tr><th>予定</th><th>現在価格・1回</th><th>時期・間隔</th></tr></thead><tbody>{data.suddenExpenses.map(e => <tr key={e.id}><th>{e.name || '名称未入力'}</th><td>{fmt(e.amount)}万円</td><td>{e.firstYear ?? e.cycleYears}年目から{e.once ? '1回のみ' : e.cycleYears + '年ごと・' + (e.endYear ?? 60) + '年目まで'}</td></tr>)}</tbody></table> : <p>未設定</p>}
       <h3>貯蓄型保険</h3>
       {data.savingsInsurances.map(si => <p key={si.id}>{si.name || '名称未入力'} / 月{fmt(si.monthly, 2)}万円を{si.payoutYear}年目まで払い、年末に{fmt(si.payoutAmount)}万円受取。</p>)}
       {!data.savingsInsurances.length && <p>設定なし</p>}
-      <h3>前提の確認状況</h3>
-      {Object.entries(REVIEW_LABELS).map(([key, label]) => <p key={key}>{data.reviewChecks[key as keyof typeof REVIEW_LABELS] ? '確認済み' : '未確認'}：{label}</p>)}
-      <h3>この試算で注意する点</h3><ul className="assumptions-list">{calc.warnings.map(w => <li key={w}>{w}</li>)}</ul>
+      <h3>計算上の注記</h3><ul className="assumptions-list">{calc.warnings.map(w => <li key={w}>{w}</li>)}</ul>
       <h3>参考資料</h3>
       <p className="plan-note"><a href={ENERGY_SOURCE}>環境省 令和5年度家庭CO2統計 図1-62</a> / <a href="https://www.jpea.gr.jp/faq/563/">JPEA 発電量の目安</a> / <a href={EDUCATION_SOURCE}>文部科学省 令和5年度学習費調査・訂正後</a> / <a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1211-1.htm">国税庁 住宅ローン控除</a> / <a href="https://www.city.izumo.shimane.jp/www/contents/1595294633348/index.html">出雲市 固定資産税</a>。参照確認：2026年9月。</p>
       <footer className="proposal-footer">この試算は意思決定を補助するもので、融資審査・税務判断・将来収入の確約ではありません。金利・家族構成・進路・料金・制度が変わったときは更新してください。</footer>

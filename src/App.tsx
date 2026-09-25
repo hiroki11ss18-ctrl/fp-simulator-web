@@ -161,7 +161,7 @@ export default function App() {
       case 'solar':   return <SolarBattery data={data} update={update} calc={calc} />;
       case 'maint':   return <Maintenance data={data} update={update} calc={calc} />;
       case 'lcc':     return <Lcc data={data} update={update} calc={calc} />;
-      case 'summary': return <Summary data={data} calc={calc} update={update} onPrint={() => handlePrint()} onExport={exportProposal} />;
+      case 'summary': return <Summary data={data} calc={calc} onPrint={() => handlePrint()} onExport={exportProposal} />;
     }
   }, [active, data, calc]);
 

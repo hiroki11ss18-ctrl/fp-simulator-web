@@ -1,14 +1,6 @@
-import type { CalcResult, SimData } from '../types';
-import { calcAll } from '../hooks/useCalculations';
+import type { CalcResult, SimData, YearRow } from '../types';
 import { clamp } from './energy';
 
-export const REVIEW_LABELS = {
-  income: '給与明細・昇給・退職金・年金を確認',
-  expenses: '生活費・旅行・車・保険・物価を確認',
-  housing: '見積・借入・税・修繕費を確認',
-  education: '進路・保育料・入学費・仕送りを確認',
-  energy: '電気明細・設備見積・売電契約を確認',
-} as const;
 export const HORIZONS = [30, 40, 50, 60] as const;
 
 export function makeStressData(data: SimData): SimData {
@@ -37,8 +29,35 @@ export function makeStressData(data: SimData): SimData {
   return d;
 }
 
+export function buildLifeStageExpenses(data: SimData, calc: CalcResult) {
+  const categories = [
+    { label: '住宅ローン・繰上返済', value: (r: YearRow) => r.loanPay },
+    { label: '生活費・掛捨保険', value: (r: YearRow) => r.living - r.insurancePremium - r.otherLoanPay },
+    { label: '住宅以外のローン', value: (r: YearRow) => r.otherLoanPay },
+    { label: '貯蓄型・学資保険の払込', value: (r: YearRow) => r.insurancePremium },
+    { label: '光熱費（節電後）', value: (r: YearRow) => r.utility },
+    { label: '固定資産税等', value: (r: YearRow) => r.propTax },
+    { label: '教育・仕送り', value: (r: YearRow) => r.eduCost },
+    { label: '修繕・設備更新', value: (r: YearRow) => r.maintCost },
+    { label: '旅行・車等の予定支出', value: (r: YearRow) => r.sudden },
+  ];
+  const summarize = (rows: YearRow[]) => {
+    if (!rows.length) return null;
+    const months = rows.length * 12;
+    const total = rows.reduce((sum, r) => sum + r.totalOut, 0);
+    return { startAge: rows[0].age - 1, endAge: rows[rows.length - 1].age - 1,
+      firstYear: rows[0].year, lastYear: rows[rows.length - 1].year, years: rows.length,
+      amounts: categories.map(item => rows.reduce((sum, r) => sum + item.value(r), 0) / months),
+      monthlyTotal: total / months, total };
+  };
+  // Match the ledger's year-start retirement boundary, including years beyond the selected horizon.
+  const isWorking = (r: YearRow) => r.age - 1 < data.basic.retireAge;
+  return { labels: categories.map(item => item.label),
+    working: summarize(calc.rows.filter(isWorking)),
+    retired: summarize(calc.rows.filter(r => !isWorking(r))), years: calc.rows.length };
+}
+
 export function buildOverview(data: SimData, calc: CalcResult) {
-  const stress = calcAll(makeStressData(data));
   const first = calc.rows[0];
   const chosen = calc.rows.slice(0, data.simYears);
   const reserve = chosen.reduce((sum, r) => sum + r.maintCost + r.sudden, 0) / data.simYears / 12;
@@ -60,11 +79,10 @@ export function buildOverview(data: SimData, calc: CalcResult) {
     const low = rows.reduce((a, r) => r.balance < a.balance ? { year: r.year, age: r.age, balance: r.balance } : a,
       { year: 0, age: data.basic.age, balance: calc.initialCash });
     const deficit = calc.initialCash < 0 ? 0 : rows.find(r => r.balance < 0)?.year ?? null;
-    const stressLow = Math.min(stress.initialCash, ...stress.rows.slice(0, years).map(r => r.balance));
     return { years, age: final.age, balance: final.balance, debt: final.loanBalance + final.otherLoanBalance,
-      low, deficit, stressBalance: stress.rows[years - 1].balance, stressLow };
+      low, deficit };
   });
   const selected = horizonRows.find(r => r.years === data.simYears)!;
-  const allConfirmed = Object.values(data.reviewChecks).every(Boolean);
-  return { stress, monthlyItems, regularIncome, monthlyOut, monthlySurplus, reserve, emergencyFund, horizonRows, selected, allConfirmed };
+  return { monthlyItems, regularIncome, monthlyOut, monthlySurplus, reserve, emergencyFund, horizonRows, selected,
+    lifeStages: buildLifeStageExpenses(data, calc) };
 }

@@ -29,7 +29,8 @@ export default function Lcc({ data, update, calc }: { data: SimData; update: (p:
   const renderFields = (fields: typeof workFields) => <div className="form-grid dense">{fields.map(([key, label]) => <Field key={key} label={label}><NumInput value={h[key]} onChange={v => set({ [key]: v })} step={0.1} suffix="万円/月" /></Field>)}</div>;
   return <div className="plan-layout">
     <section className="plan-section">
-      <div className="section-heading"><h2>毎月の暮らし</h2><span>金額は現在の価格・月額</span></div>
+      <div className="section-heading"><h2>現役中の生活費</h2><span>世帯全体 / 現在価格の月額</span></div>
+      <p className="plan-note mb-4">世帯主が{b.retireAge}歳になる前の生活費・掛捨保険です。住宅ローン・教育費・税金・旅行・修繕は別に計上します。</p>
       {renderFields(workFields)}
       <p className="plan-note">車の維持費と買い替え費、趣味・交際費と旅行費、教育費に含まれる塾・習い事の重複に注意。年払いの保険は12で割った月額で計上します。</p>
     </section>
@@ -46,8 +47,8 @@ export default function Lcc({ data, update, calc }: { data: SimData; update: (p:
       <p className="plan-note">初年度の光熱費は節電後 {fmt(calc.rows[0].utility / 12, 2)} 万円/月。売電は別の収入です。オール電化の場合も使用量・料金を確認し、ガス・灯油を0円にしてください。</p>
     </section>
     <section className="plan-section">
-      <h2>退職後の暮らし</h2>
-      <p className="plan-note">世帯主が{b.retireAge}歳で退職した後の世帯生活費。現在の価格で入力し、将来の物価上昇を別途加算します。</p>
+      <div className="section-heading"><h2>退職後の生活費</h2><span>世帯全体 / 現在価格の月額</span></div>
+      <p className="plan-note mb-4">世帯主が{b.retireAge}歳になった年からの生活費・掛捨保険です。配偶者が就業中でもこの金額へ切り替えます。将来の物価上昇は別途加算し、住宅ローン・教育費・税金・旅行・修繕は別に計上します。</p>
       {renderFields(retiredFields)}
       <div className="form-grid mt-4"><Field label="退職後の光熱費合計（節電前）" hint="0は現役期と同額。太陽光の節電額を別途差し引きます。"><NumInput value={h.retUtility} onChange={v => set({ retUtility: v })} suffix="万円/月" step={0.1} /></Field></div>
     </section>
