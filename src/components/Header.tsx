@@ -8,7 +8,6 @@ export const TABS = [
   { id: 'basic', label: '基本情報' },
   { id: 'housing', label: '住宅資金計画' },
   { id: 'loan', label: 'ローン計画' },
-  { id: 'solar', label: '太陽光・蓄電池' },
   { id: 'maint', label: 'メンテナンス' },
   { id: 'lcc', label: '家計・教育費' },
   { id: 'summary', label: '総合まとめ' },

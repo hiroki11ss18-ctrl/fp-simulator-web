@@ -12,10 +12,10 @@ export function downloadText(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function csvFor(calc: CalcResult) {
-  const header = ['経過年', '年末年齢', '給与手取り', '年金手取り', '退職金', '保険受取', '住宅ローン控除', '売電収入', '住宅ローン返済', '生活費・他ローン・保険', '光熱費（節電後）', '固定資産税等', '教育費', '修繕費', '予定支出', '年間収支', '年末手元資金', '住宅ローン残高', '他ローン残高', '出来事'];
+  const header = ['経過年', '年末年齢', '給与手取り', '年金手取り', '退職金', '保険受取', '住宅ローン控除', '住宅ローン返済', '生活費・他ローン・保険', '光熱費（電気・ガス・水道）', '固定資産税等', '教育費', '修繕費', '予定支出', '年間収支', '年末手元資金', '住宅ローン残高', '他ローン残高', '出来事'];
   const cell = (v: string | number) => typeof v === 'number' ? v.toFixed(2) : '"' + (/^[=+\-@\t\r]/.test(v) ? "'" : '') + v.replace(/"/g, '""') + '"';
-  return '\uFEFF' + [header, [0, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', calc.initialCash, calc.loan, '', '購入直後・金額は万円'],
-    ...calc.rows.map(r => [r.year, r.age, r.wage, r.pension, r.retBonus, r.insurancePayout, r.taxBack, r.solarSale, r.loanPay, r.living, r.utility, r.propTax, r.eduCost, r.maintCost, r.sudden, r.net, r.balance, r.loanBalance, r.otherLoanBalance, r.events.join(' / ')])].map(row => row.map(cell).join(',')).join('\r\n');
+  return '\uFEFF' + [header, [0, '', '', '', '', '', '', '', '', '', '', '', '', '', '', calc.initialCash, calc.loan, '', '購入直後・金額は万円'],
+    ...calc.rows.map(r => [r.year, r.age, r.wage, r.pension, r.retBonus, r.insurancePayout, r.taxBack, r.loanPay, r.living, r.utility, r.propTax, r.eduCost, r.maintCost, r.sudden, r.net, r.balance, r.loanBalance, r.otherLoanBalance, r.events.join(' / ')])].map(row => row.map(cell).join(',')).join('\r\n');
 }
 
 export default function Summary({ data, calc, onPrint, onExport }: {
@@ -24,9 +24,9 @@ export default function Summary({ data, calc, onPrint, onExport }: {
   const view = useMemo(() => buildOverview(data, calc), [data, calc]);
   const periodRows = calc.rows.slice(0, data.simYears);
   const incomeItems = [['給与（手取り）', calc.lifeIncWage], ['年金（手取り）', calc.lifeIncPension], ['退職金', calc.lifeIncRetBonus],
-    ['保険満期受取', calc.lifeIncSiPayout], ['住宅ローン控除', calc.lifeIncTaxBack], ['売電収入', calc.lifeIncSolar]] as const;
+    ['保険満期受取', calc.lifeIncSiPayout], ['住宅ローン控除', calc.lifeIncTaxBack]] as const;
   const expenseItems = [['住宅ローン・繰上返済', calc.lifeExpLoanPay], ['生活費・他ローン・掛捨保険', calc.lifeExpLiving],
-    ['積立保険料', calc.lifeExpSiPaid], ['光熱費（節電後）', calc.lifeExpUtility], ['固定資産税等', calc.lifeExpPropTax],
+    ['積立保険料', calc.lifeExpSiPaid], ['光熱費（電気・ガス・水道）', calc.lifeExpUtility], ['固定資産税等', calc.lifeExpPropTax],
     ['教育・仕送り', calc.lifeExpEdu], ['修繕・設備更新', calc.lifeExpMaint], ['旅行・車等の予定支出', calc.lifeExpSudden]] as const;
   return <div className="plan-layout summary-view">
     <section className="summary-heading">
@@ -50,12 +50,12 @@ export default function Summary({ data, calc, onPrint, onExport }: {
       <p className="plan-note">年齢は各年の終了時点。1年目から60年目末までを計算し、30年目末などの修繕・買い替えも含みます。年末残高がプラスでも、年内の大きな支払いに備えた別途の資金繰り確認が必要です。</p>
     </section>
     <section className="plan-section"><h2>購入後1年目の月額予算</h2><MonthlyBudget overview={view} />
-      <p className="plan-note">初年度の給与・賞与・年金・売電を12で割った月平均です。賞与を受け取らない月の収支とは異なります。退職金・控除・保険満期は除外。修繕・旅行・車等の積立は{data.simYears}年間の予定総額÷{data.simYears}年÷12の目安です。残高の計算では積立を再度差し引かず、実際の発生年に支出します。繰上返済は年次表で別途確認してください。</p>
+      <p className="plan-note">初年度の給与・賞与・年金を12で割った月平均です。賞与を受け取らない月の収支とは異なります。退職金・控除・保険満期は除外。修繕・旅行・車等の積立は{data.simYears}年間の予定総額÷{data.simYears}年÷12の目安です。残高の計算では積立を再度差し引かず、実際の発生年に支出します。繰上返済は年次表で別途確認してください。</p>
     </section>
     <section className="plan-section"><h2>現役中・退職後の支出</h2><LifeStageExpenses overview={view} /></section>
     <section className="plan-section"><h2>最後に残るお金の計算</h2><MoneyBridge calc={calc} years={data.simYears} />
       <div className="split-ledger">{[incomeItems, expenseItems].map((items, i) => <div key={i}><h3>{i === 0 ? '収入の内訳' : '支出の内訳'}</h3><table className="plan-table"><tbody>{items.map(([label, value]) => <tr key={label}><th>{label}</th><td>{fmt(value)}万円</td></tr>)}</tbody></table></div>)}</div>
-      <p className="plan-note">太陽光の節電額は光熱費を減らし、売電だけを収入にしています。内部の計算は丸めず、画面表示のみ万円単位で四捨五入しているため、表示値の合計に端数差が出る場合があります。</p>
+      <p className="plan-note">内部の計算は丸めず、画面表示のみ万円単位で四捨五入しているため、表示値の合計に端数差が出る場合があります。</p>
     </section>
     <details className="plan-section"><summary>計算上の注記</summary><ul className="assumptions-list">{calc.warnings.map(w => <li key={w}>{w}</li>)}</ul></details>
     <section className="plan-section">

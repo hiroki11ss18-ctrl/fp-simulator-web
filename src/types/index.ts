@@ -111,47 +111,6 @@ export interface LoanPlan {
   taxSpouseAnnualCap: number;
 }
 
-// ─── 太陽光・蓄電池 ───
-export interface SolarBattery {
-  enabled: boolean;        // 太陽光 導入ON/OFF
-  funding: 'included' | 'cash' | 'loan';
-  generationYield: number;
-  degradationPct: number;
-  batteryEfficiencyPct: number;
-  baseChargeMonthly: number;
-  panelLifeYears: number;
-  panelReplace: boolean;
-  panelReplaceCost: number;
-  battEnabled: boolean;    // 蓄電池 導入ON/OFF（太陽光ONが前提）
-  solarKw: number;         // パネル容量 kW
-  powerconKw: number;      // パワコン容量 kW
-  solarCost: number;       // 設置費用 万円
-  battCost: number;        // 蓄電池費用 万円
-  battCapacity: number;    // 蓄電池容量 kWh
-  fitRate: number;         // FIT売電単価 円/kWh
-  fitStepYears: number;
-  fitRateMiddle: number;
-  fitRateAfter: number;    // FIT後単価
-  fitYears: number;        // FIT期間
-  elecPriceDay: number;    // 昼間買電単価 円/kWh
-  elecPriceNight: number;  // 夜間買電単価
-  dayUsageRatio: number;   // 昼間使用比率 %
-  monthlyUsage: number;    // 月間電気使用量 kWh
-  elecBillManual: number | null; // 電気代手動入力（null=自動）
-  genAuto: boolean;        // 月別発電量自動計算
-  genM: number[];          // 手動月別発電量（12個）
-  genAnnualKwh: number;    // 年間発電量の手動指定（0=自動: パネル×1100×効率）
-  selfRateManual: boolean;
-  selfRateSolar: number;   // 太陽光のみ自家消費率 %
-  selfRateBatt: number;    // 太陽光+蓄電池自家消費率 %
-  powerconCost: number;    // パワコン交換費 万円
-  powerconCycle: number;   // パワコン交換サイクル 年
-  battReplaceCost: number;
-  battReplaceCycle: number;
-  solarMaintCost: number;
-  solarMaintCycle: number;
-}
-
 // ─── メンテナンス ───
 export interface MaintItem {
   id: string;
@@ -183,6 +142,7 @@ export interface HouseholdExpenses {
   retMedical: number; retOther: number;
   retIns1: number; retIns2: number; retIns3: number; retIns4: number;
   // 光熱費（LCCシートで設定）
+  utilityInputVersion: number; // 1=月額を直接入力（0円も有効）
   electricMonthly: number; gasMonthly: number; waterMonthly: number;
   inflationRate: number;
 }
@@ -212,7 +172,6 @@ export interface SimData {
   basic: BasicInfo;
   housing: HousingPlan;
   loan: LoanPlan;
-  solar: SolarBattery;
   maint: Maintenance;
   household: HouseholdExpenses;
   simYears: SimYears;
@@ -235,7 +194,6 @@ export interface YearRow {
   propTax: number;
   eduCost: number;
   maintCost: number;
-  solarBenefit: number; // 売電収入。節電はutilityを減額して計上
   leaveIncomeLoss: number; // 産休・育休による収入減
   sudden: number;     // 急な出費（年間合計）
   taxBack: number;    // 住宅ローン控除（年額）
@@ -251,8 +209,6 @@ export interface YearRow {
   insurancePremium: number;
   otherLoanPay: number;
   otherLoanBalance: number;
-  solarSaving: number;
-  solarSale: number;
   prepaid: number;
   totalOut: number;
 }
@@ -262,7 +218,6 @@ export interface CalcResult {
   initialSavings: number;
   initialCash: number;
   cashRequired: number;
-  solarInitial: number;
   warnings: string[];
   loan: number;         // 実借入額 万円
   loanAuto: number;     // 自動借入額
@@ -286,15 +241,8 @@ export interface CalcResult {
   totalPropTax: number;
   totalEdu: number;
   totalMaint: number;
-  totalSolar: number;
   totalLiving: number;
   lccGrand: number;
-  // 太陽光
-  solarAnnualFit: number;
-  solarAnnualPost: number;
-  annualKwh: number;
-  afterBill: number;    // 太陽光後の月電気代 万円
-  effectiveElecBill: number; // 現在の電気代 万円/月
   // 年金
   pensionM: number;
   spPensionM: number;
@@ -303,7 +251,6 @@ export interface CalcResult {
   lifeIncPension: number;    // 年金収入（退職後）
   lifeIncRetBonus: number;   // 退職金
   lifeIncTaxBack: number;    // 住宅ローン控除
-  lifeIncSolar: number;      // 太陽光効果（節電+売電）
   lifeIncSiPayout: number;   // 貯蓄型保険 満期受取
   lifeLeaveIncomeLoss: number; // 産休・育休による収入減
   lifeExpLoanPay: number;    // ローン返済合計

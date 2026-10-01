@@ -12,9 +12,6 @@ export const DEFAULT_MAINT_ITEMS: MaintItem[] = [
   { id: 'aircon',  name: '❄️ エアコン交換', cycleYears: 12, cost: 25, enabled: true },
 ];
 
-// 月別発電量シェア係数（kW×1100kWh/年ベース）
-export const MFACTORS = [0.7726,0.903,1.0836,1.1639,1.2542,0.9732,1.0334,1.1839,0.9833,1.0234,0.8629,0.7625];
-
 const today = localISODate();
 
 export const DEFAULT_DATA: SimData = {
@@ -64,23 +61,6 @@ export const DEFAULT_DATA: SimData = {
     isLongTermHouse: true,
     taxInclude: false, taxAnnualCap: 0, taxSpouseAnnualCap: 0,
   },
-  solar: {
-    enabled: true,
-    funding: 'included', generationYield: 1000, degradationPct: 0.5,
-    batteryEfficiencyPct: 90, baseChargeMonthly: 0,
-    panelLifeYears: 30, panelReplace: true, panelReplaceCost: 135,
-    battEnabled: false,
-    solarKw: 4.5, powerconKw: 4.5, solarCost: 135,
-    battCost: 0, battCapacity: 10,
-    fitRate: 24, fitStepYears: 4, fitRateMiddle: 8.3, fitRateAfter: 8.0, fitYears: 10,
-    elecPriceDay: 30, elecPriceNight: 26, dayUsageRatio: 40,
-    monthlyUsage: 400, elecBillManual: null,
-    genAuto: true, genM: [], genAnnualKwh: 0,
-    selfRateManual: false, selfRateSolar: 30, selfRateBatt: 70,
-    powerconCost: 25, powerconCycle: 15,
-    battReplaceCost: 100, battReplaceCycle: 15,
-    solarMaintCost: 5, solarMaintCycle: 10,
-  },
   maint: { items: DEFAULT_MAINT_ITEMS },
   household: {
     food: 8, transport: 3, daily: 2, clothes: 1, hobby: 2, car: 2,
@@ -92,7 +72,8 @@ export const DEFAULT_DATA: SimData = {
     retClothes: 0.5, retHobby: 3, retCar: 1, retSocial: 1,
     retMedical: 2, retOther: 1,
     retIns1: 0, retIns2: 0, retIns3: 0, retIns4: 0,
-    electricMonthly: 0, gasMonthly: 0.8, waterMonthly: 0.3,
+    utilityInputVersion: 1,
+    electricMonthly: 1.104, gasMonthly: 0.8, waterMonthly: 0.3,
     inflationRate: 0,
   },
   simYears: 30,

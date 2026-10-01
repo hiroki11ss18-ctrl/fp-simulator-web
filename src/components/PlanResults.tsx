@@ -17,7 +17,7 @@ export function HorizonTable({ overview }: { overview: Overview }) {
 
 export function MoneyBridge({ calc, years }: { calc: CalcResult; years: number }) {
   const rows = calc.rows.slice(0, years);
-  const income = rows.reduce((a, r) => a + r.income + r.solarSale, 0);
+  const income = rows.reduce((a, r) => a + r.income, 0);
   const spending = rows.reduce((a, r) => a + r.totalOut, 0);
   return <div className="money-bridge">
     <div><span>現在の貯蓄</span><strong>{fmt(calc.initialSavings)}万円</strong></div><b>−</b>
@@ -30,7 +30,7 @@ export function MoneyBridge({ calc, years }: { calc: CalcResult; years: number }
 
 export function MonthlyBudget({ overview }: { overview: Overview }) {
   return <table className="plan-table budget-table"><tbody>
-    <tr><th>初年度の手取り収入・年金・売電（月平均）</th><td>{fmt(overview.regularIncome, 2)}万円</td></tr>
+    <tr><th>初年度の給与手取り・年金（月平均）</th><td>{fmt(overview.regularIncome, 2)}万円</td></tr>
     {overview.monthlyItems.map(i => <tr key={i.label}><th>{i.label}</th><td>−{fmt(i.amount, 2)}万円</td></tr>)}
     <tr className="strong-row"><th>支払い・積立後の月平均余力</th><td className={overview.monthlySurplus < 0 ? 'negative' : ''}>{fmt(overview.monthlySurplus, 2)}万円</td></tr>
   </tbody></table>;
@@ -61,11 +61,11 @@ export function LifeStageExpenses({ overview }: { overview: Overview }) {
 
 export function AnnualTable({ rows, detailed = false }: { rows: YearRow[]; detailed?: boolean }) {
   return <div className="table-scroll"><table className="plan-table annual-table"><thead><tr>
-    <th>経過年<br />世帯主年齢</th><th>手取り収入<br />売電含む</th><th>住宅ローン</th>
+    <th>経過年<br />世帯主年齢</th><th>手取り収入</th><th>住宅ローン</th>
     {detailed ? <><th>生活・光熱</th><th>教育費</th><th>税金</th><th>修繕・予定</th></> : <th>その他支出</th>}
     <th>年間収支</th><th>年末手元資金</th><th>出来事</th>
   </tr></thead><tbody>{rows.map(r => <tr key={r.year}>
-    <th>{r.year}年 / {r.age}歳</th><td>{fmt(r.income + r.solarSale)}</td><td>{fmt(r.loanPay)}</td>
+    <th>{r.year}年 / {r.age}歳</th><td>{fmt(r.income)}</td><td>{fmt(r.loanPay)}</td>
     {detailed ? <><td>{fmt(r.living + r.utility)}</td><td>{fmt(r.eduCost)}</td><td>{fmt(r.propTax)}</td><td>{fmt(r.maintCost + r.sudden)}</td></> : <td>{fmt(r.totalOut - r.loanPay)}</td>}
     <td className={r.net < 0 ? 'negative' : ''}>{fmt(r.net)}</td><td className={r.balance < 0 ? 'negative' : ''}>{fmt(r.balance)}</td><td className="event-cell">{r.events.join(' / ') || ' '}</td>
   </tr>)}</tbody></table></div>;

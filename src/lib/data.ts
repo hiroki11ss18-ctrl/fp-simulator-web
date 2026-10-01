@@ -1,5 +1,6 @@
 import { DEFAULT_DATA } from './defaults';
 import type { SimData } from '../types';
+import { clamp } from './math';
 import { legacyAssessment, BUILDING_ASSESSMENT_RATIO, LAND_ASSESSMENT_RATIO,
   BUILD_EVAL_PER_TSUBO_FALLBACK, LAND_EVAL_PER_TSUBO_FALLBACK } from './propertyAssessment';
 
@@ -35,8 +36,20 @@ export function normalizeData(raw: unknown): SimData {
       else if (h.propTaxLandValue === null) h.propTaxLandValue = value;
     }
   }
-  const legacySolar = raw && typeof raw === 'object' ? (raw as Partial<SimData>).solar : undefined;
-  if (legacySolar && legacySolar.fitStepYears === undefined) d.solar.fitStepYears = d.solar.fitYears;
+  const old = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const oldHousehold = old.household && typeof old.household === 'object' ? old.household as Record<string, unknown> : {};
+  if (oldHousehold.utilityInputVersion !== 1 && old.solar && typeof old.solar === 'object') {
+    const s = old.solar as Record<string, unknown>;
+    const valid = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+    const number = (key: string, fallback: number) => valid(s[key]) ? s[key] as number : fallback;
+    // Resolve the old pre-discount bill once. In the new model zero is an explicit bill, not an auto-calculation flag.
+    const ratio = clamp(number('dayUsageRatio', 40), 0, 100) / 100;
+    const autoBill = number('baseChargeMonthly', 0) + number('monthlyUsage', 400)
+      * (ratio * number('elecPriceDay', 30) + (1 - ratio) * number('elecPriceNight', 26)) / 1e4;
+    d.household.electricMonthly = valid(oldHousehold.electricMonthly) && oldHousehold.electricMonthly > 0
+      ? oldHousehold.electricMonthly : valid(s.elecBillManual) ? s.elecBillManual : autoBill;
+  }
+  d.household.utilityInputVersion = 1;
   const templateExpense = { id: '', name: '', amount: 0, cycleYears: 1, firstYear: 1, endYear: 60, once: false };
   d.suddenExpenses = d.suddenExpenses.filter(v => v && typeof v === 'object').map((e, i) => {
     const clean = mergeWithDefaults(templateExpense, e);
@@ -54,9 +67,7 @@ export function normalizeData(raw: unknown): SimData {
   const validNumbers = (values: number[], length: number, fallback: number[]) => values.length === length && values.every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0) ? values : [...fallback];
   d.basic.salaryManual = validNumbers(d.basic.salaryManual, 8, DEFAULT_DATA.basic.salaryManual);
   d.basic.spouseSalaryManual = validNumbers(d.basic.spouseSalaryManual, 8, DEFAULT_DATA.basic.spouseSalaryManual);
-  d.solar.genM = validNumbers(d.solar.genM, 12, []);
   if (![30, 40, 50, 60].includes(d.simYears)) d.simYears = 30;
-  if (!['included', 'cash', 'loan'].includes(d.solar.funding)) d.solar.funding = 'included';
   if (!['var', 'fix'].includes(d.loan.loanType)) d.loan.loanType = 'var';
   if (!['期間短縮', '返済額軽減'].includes(d.loan.ptype)) d.loan.ptype = '期間短縮';
   if (!['long_term', 'zeh', 'general'].includes(d.loan.taxHouseType)) d.loan.taxHouseType = 'long_term';

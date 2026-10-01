@@ -1,5 +1,5 @@
 import type { LoanPlan } from '../types';
-import { clamp } from './energy';
+import { clamp } from './math';
 
 export function loanSchedule(l: LoanPlan, principalMan: number) {
   const months = Math.round(clamp(l.years, 1, 60)) * 12;

@@ -8,14 +8,16 @@ const server = await createServer({ configFile: false, envDir: false, optimizeDe
 after(async () => { await server.close(); });
 const { calcAll, calcMonthly, calcMaxLoan, calcPropertyTax, getTaxBorrowLimit } = await server.ssrLoadModule('/src/hooks/useCalculations.ts');
 const { DEFAULT_DATA } = await server.ssrLoadModule('/src/lib/defaults.ts');
-const { energyYear, solarMaintenance } = await server.ssrLoadModule('/src/lib/energy.ts');
 const { loanSchedule } = await server.ssrLoadModule('/src/lib/loans.ts');
 const { normalizeData } = await server.ssrLoadModule('/src/lib/data.ts');
 const { buildOverview, buildLifeStageExpenses, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
 const { occursInYear } = await server.ssrLoadModule('/src/lib/suddenExpenses.ts');
 const { default: PrintProposal } = await server.ssrLoadModule('/src/components/PrintProposal.tsx');
 const { default: HousingPlan } = await server.ssrLoadModule('/src/components/tabs/HousingPlan.tsx');
-const { default: Summary } = await server.ssrLoadModule('/src/components/tabs/Summary.tsx');
+const { default: Summary, csvFor } = await server.ssrLoadModule('/src/components/tabs/Summary.tsx');
+const { default: Lcc } = await server.ssrLoadModule('/src/components/tabs/Lcc.tsx');
+const { default: Maintenance } = await server.ssrLoadModule('/src/components/tabs/Maintenance.tsx');
+const { TABS } = await server.ssrLoadModule('/src/components/Header.tsx');
 const { PROPOSAL_STYLES } = await server.ssrLoadModule('/src/lib/proposalStyles.ts');
 const fresh = () => { const d = structuredClone(DEFAULT_DATA); d.basic.date = '2026-09-22'; return d; };
 const near = (a, b, epsilon = 1e-6) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
@@ -28,21 +30,35 @@ test('saved proposal uses unescaped trusted CSS but escapes customer text', () =
   assert.ok(!html.includes('<script>')); assert.ok(html.includes('60年 / 93歳'));
 });
 
-test('FIT 2026 changes at years 5 and 11, with physical generation unchanged', () => {
-  const d = fresh(); d.solar.degradationPct = 0;
-  const y4 = energyYear(d, 3), y5 = energyYear(d, 4), y10 = energyYear(d, 9), y11 = energyYear(d, 10);
-  assert.ok(y4.sold > 0); near(y4.sale / y4.sold, 24 / 1e4);
-  near(y5.sale / y5.sold, 8.3 / 1e4); near(y10.sale / y10.sold, 8.3 / 1e4);
-  near(y11.sale / y11.sold, 8 / 1e4); near(y4.generation, y5.generation);
+test('legacy automatic bill migrates before discounts, without changing purchase or other inputs', () => {
+  const d = fresh(); delete d.household.utilityInputVersion;
+  d.household.electricMonthly = 0; d.housing.actualLoan = 5000;
+  d.solar = { monthlyUsage: 500, dayUsageRatio: 25, elecPriceDay: 40, elecPriceNight: 20, baseChargeMonthly: 0.1, elecBillManual: null };
+  const original = JSON.stringify(d), restored = normalizeData(d);
+  near(restored.household.electricMonthly, 1.35);
+  assert.ok(!('solar' in restored)); assert.equal(restored.household.utilityInputVersion, 1);
+  for (const key of ['basic', 'housing', 'loan', 'maint', 'suddenExpenses', 'savingsInsurances']) assert.deepEqual(restored[key], d[key]);
+  assert.equal(JSON.stringify(d), original);
+  assert.deepEqual(normalizeData(JSON.parse(JSON.stringify(restored))), restored);
+  invariant(calcAll(restored));
 });
-test('legacy flat FIT preserves the original contract through year 10', () => {
-  const d = fresh(); delete d.solar.fitStepYears; delete d.solar.fitRateMiddle; d.solar.fitRate = 16;
-  const restored = normalizeData(d); assert.equal(restored.solar.fitStepYears, 10);
-  const y5 = energyYear(restored, 4); near(y5.sale / y5.sold, 16 / 1e4);
+test('legacy manual bill priority preserves positive household bills and explicit zero solar bills', () => {
+  const d = fresh(); delete d.household.utilityInputVersion;
+  d.household.electricMonthly = 3; d.solar = { elecBillManual: 1.8 };
+  near(normalizeData(d).household.electricMonthly, 3);
+  d.household.electricMonthly = 0; near(normalizeData(d).household.electricMonthly, 1.8);
+  d.solar.elecBillManual = 0;
+  const restored = normalizeData(d); near(restored.household.electricMonthly, 0);
+  near(normalizeData(JSON.parse(JSON.stringify(restored))).household.electricMonthly, 0);
 });
-test('zero battery efficiency delivers no energy and never produces NaN', () => {
-  const d = fresh(); d.solar.battEnabled = true; d.solar.batteryEfficiencyPct = 0;
-  const e = energyYear(d); near(e.delivered, 0); assert.ok(Number.isFinite(e.sale)); invariant(calcAll(d));
+test('partial and malformed legacy energy inputs use finite defaults; modern zero stays zero', () => {
+  const d = fresh(); delete d.household.utilityInputVersion;
+  d.household.electricMonthly = 0; d.solar = { monthlyUsage: 'bad', elecBillManual: 'bad', dayUsageRatio: -20, elecPriceDay: NaN };
+  near(normalizeData(d).household.electricMonthly, 1.104);
+  d.household.utilityInputVersion = 1;
+  near(normalizeData(d).household.electricMonthly, 0);
+  delete d.solar; delete d.household.utilityInputVersion;
+  near(normalizeData(d).household.electricMonthly, 0);
 });
 test('malformed imported array members cannot escape normalization', () => {
   const d = normalizeData({ suddenExpenses: [null, { id: {}, firstYear: 'broken', amount: '100', cycleYears: 8 }],
@@ -66,9 +82,9 @@ function invariant(c) {
     for (const value of Object.values(r)) if (typeof value === 'number') assert.ok(Number.isFinite(value));
     near(r.income, r.wage + r.pension + r.retBonus + r.taxBack + r.insurancePayout);
     near(r.totalOut, r.loanPay + r.living + r.utility + r.propTax + r.eduCost + r.maintCost + r.sudden);
-    near(r.net, r.income + r.solarSale - r.totalOut);
+    near(r.net, r.income - r.totalOut);
     balance += r.net; near(r.balance, balance, 1e-5);
-    assert.ok(r.loanBalance >= 0 && r.utility >= 0 && r.solarSaving >= 0);
+    assert.ok(r.loanBalance >= 0 && r.utility >= 0);
   });
 }
 
@@ -77,7 +93,7 @@ test('all horizons reconcile without internal rounding', () => {
     const d = fresh(); d.simYears = years;
     const c = calcAll(d); invariant(c);
     const rows = c.rows.slice(0, years);
-    near(c.initialCash + sum(rows, 'income') + sum(rows, 'solarSale') - sum(rows, 'totalOut'), rows.at(-1).balance, 1e-6);
+    near(c.initialCash + sum(rows, 'income') - sum(rows, 'totalOut'), rows.at(-1).balance, 1e-6);
     near(c.lifeIncWage, sum(rows, 'wage')); near(c.lifeIncPension, sum(rows, 'pension'));
     near(c.totalMaint, sum(rows, 'maintCost')); near(c.totalEdu, sum(rows, 'eduCost'));
   }
@@ -133,13 +149,18 @@ test('review rate only changes qualification maximum, not actual cashflow', () =
   assert.ok(calcMaxLoan(650, 35, 0, 35) > calcMaxLoan(650, 35, 3, 35));
   assert.ok(calcMaxLoan(650, 35, 3, 35, 5) < calcMaxLoan(650, 35, 3, 35));
 });
-test('equipment included, cash, and mortgage funding are not double counted', () => {
-  const d = fresh(); d.solar.battEnabled = true; d.solar.battCost = 150;
-  const included = calcAll(d); d.solar.funding = 'cash'; const cash = calcAll(d);
-  near(cash.loan, included.loan); near(cash.initialCash, included.initialCash - 285);
-  d.solar.funding = 'loan'; const loan = calcAll(d);
-  near(loan.loan, included.loan + 285); near(loan.initialCash, included.initialCash);
-  d.solar.enabled = false; const off = calcAll(d); near(off.solarInitial, 0); near(off.loan, included.loan);
+test('legacy equipment settings never affect FP costs, borrowing, income, utility or maintenance', () => {
+  const d = fresh(); d.maint.items = [];
+  const before = calcAll(d);
+  near(before.totalCost, 4610); near(before.loan, 4310); near(before.cashRequired, 300);
+  for (const funding of ['included', 'cash', 'loan']) {
+    d.solar = { enabled: true, funding, solarKw: 20, solarCost: 1000, battEnabled: true, battCost: 800,
+      fitRate: 999, elecBillManual: 90, panelReplace: true, panelLifeYears: 1, panelReplaceCost: 500,
+      powerconCycle: 1, powerconCost: 500, battReplaceCycle: 1, battReplaceCost: 500, solarMaintCycle: 1, solarMaintCost: 500 };
+    assert.deepEqual(calcAll(d), before); assert.deepEqual(calcAll(normalizeData(d)), before);
+  }
+  assert.ok(before.rows.every(r => r.maintCost === 0 && !('solarSale' in r) && !('solarSaving' in r)));
+  assert.ok(!('solarInitial' in before) && !('totalSolar' in before));
 });
 test('manual mortgage funding difference comes from savings', () => {
   const d = fresh(), c = calcAll(d); d.housing.actualLoan = c.loan - 500;
@@ -184,7 +205,7 @@ test('education custom cost and future inflation are honored', () => {
   const c = calcAll(d); near(c.rows[0].eduCost, 20); near(c.rows[1].eduCost, 20.4);
 });
 test('events and maintenance include exact 30 and 60 year boundaries', () => {
-  const d = fresh(); d.solar.enabled = false; d.maint.items = [{ id: 'boundary', name: 'Boundary', enabled: true, cost: 100, cycleYears: 30 }];
+  const d = fresh(); d.maint.items = [{ id: 'boundary', name: 'Boundary', enabled: true, cost: 100, cycleYears: 30 }];
   d.suddenExpenses = [{ id: 'travel', name: 'Travel', amount: 10, cycleYears: 1 }];
   const c = calcAll(d); near(c.rows[29].maintCost, 100); near(c.rows[59].maintCost, 100); near(c.totalMaint, 100); near(c.lifeExpSudden, 300);
 });
@@ -212,34 +233,51 @@ test('2028 long-term house borrowing limit uses the current supported rule', () 
   near(getTaxBorrowLimit('long_term', 2028, true), 5000); near(getTaxBorrowLimit('long_term', 2028, false), 4500);
   near(getTaxBorrowLimit('general', 2028, true), 0); near(getTaxBorrowLimit('long_term', 2031, true), 0);
 });
-test('energy conservation, day-night demand caps and battery loss', () => {
-  const d = fresh(); Object.assign(d.solar, { battEnabled: true, solarKw: 15, powerconKw: 15, monthlyUsage: 200 });
-  const e = energyYear(d);
-  for (const m of e.months) {
-    near(m.generation, m.direct + m.delivered + m.loss + m.sold);
-    near(m.purchased + m.direct + m.delivered, 200);
-    assert.ok(m.direct <= 80 + 1e-6); assert.ok(m.delivered <= 120 + 1e-6); assert.ok(m.loss >= 0);
+test('ordinary utility bills accept zero independently and add each bill exactly once', () => {
+  const d = fresh(); Object.assign(d.household, { electricMonthly: 2, gasMonthly: 0.6, waterMonthly: 0.4, retUtility: 0 });
+  near(calcAll(d).rows[0].utility, 36);
+  d.household.electricMonthly = 0; near(calcAll(d).rows[0].utility, 12);
+  d.household.gasMonthly = 0; near(calcAll(d).rows[0].utility, 4.8);
+  d.household.waterMonthly = 0; assert.ok(calcAll(d).rows.every(r => r.utility === 0));
+});
+test('retirement utility switches at start-of-year age and uses cumulative inflation', () => {
+  const d = fresh(); Object.assign(d.basic, { age: 64, retireAge: 65 });
+  Object.assign(d.household, { electricMonthly: 2, gasMonthly: 0.6, waterMonthly: 0.4, retUtility: 2.5, inflationRate: 2 });
+  const c = calcAll(d); near(c.rows[0].utility, 36); near(c.rows[1].utility, 30 * 1.02); near(c.rows[59].utility, 30 * 1.02 ** 59);
+  d.household.retUtility = 0; near(calcAll(d).rows[1].utility, 36 * 1.02);
+  d.basic.age = 65; d.household.retUtility = 2.5; near(calcAll(d).rows[0].utility, 30);
+});
+test('bill changes reconcile every horizon and monthly and life-stage totals without adding income', () => {
+  const d = fresh(); d.household.retUtility = 0; const before = calcAll(d);
+  d.household.electricMonthly += 1; const after = calcAll(d);
+  for (const years of [30, 40, 50, 60]) {
+    near(before.rows[years - 1].balance - after.rows[years - 1].balance, years * 12);
+    near(sum(before.rows.slice(0, years), 'income'), sum(after.rows.slice(0, years), 'income'));
   }
+  near(buildOverview(d, before).monthlySurplus - buildOverview(d, after).monthlySurplus, 1);
+  const stagesBefore = buildLifeStageExpenses(d, before), stagesAfter = buildLifeStageExpenses(d, after);
+  near(stagesAfter.working.monthlyTotal - stagesBefore.working.monthlyTotal, 1);
+  near(stagesAfter.retired.monthlyTotal - stagesBefore.retired.monthlyTotal, 1);
 });
-test('zero consumption never produces self-consumption savings even with manual targets', () => {
-  const d = fresh(); Object.assign(d.solar, { monthlyUsage: 0, selfRateManual: true, selfRateSolar: 100, selfRateBatt: 100, battEnabled: true });
-  const e = energyYear(d); near(e.direct, 0); near(e.delivered, 0); near(e.saving, 0);
+test('all affected views and navigation omit solar and display ordinary utility bills', () => {
+  const d = fresh(), c = calcAll(d);
+  assert.equal(TABS.length, 6); assert.ok(!TABS.some(t => t.id === 'solar'));
+  for (const component of [Summary, PrintProposal, Lcc, Maintenance, HousingPlan]) {
+    const html = renderToStaticMarkup(createElement(component, { data: d, calc: c, update: () => {}, onPrint: () => {}, onExport: () => {} }));
+    for (const word of ['太陽光', '蓄電池', '節電', '売電', 'FIT', 'パワコン']) assert.ok(!html.includes(word), word);
+  }
+  const html = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: c }));
+  assert.ok(html.includes('現役中の光熱費（月額）')); assert.ok(html.includes('退職後の光熱費（月額）'));
 });
-test('day and night prices are assigned to the matching energy flows', () => {
-  const d = fresh(); Object.assign(d.solar, { battEnabled: true, elecPriceDay: 40, elecPriceNight: 10 });
-  const e = energyYear(d); near(e.saving, (e.direct * 40 + e.delivered * 10) / 1e4);
-});
-test('LCC and solar manual electricity amounts and zero override affect the ledger', () => {
-  const d = fresh(); d.solar.enabled = false; d.household.electricMonthly = 3;
-  let c = calcAll(d); near(c.rows[0].utility, (3 + d.household.gasMonthly + d.household.waterMonthly) * 12);
-  d.household.electricMonthly = 0; d.solar.elecBillManual = 0;
-  c = calcAll(d); near(c.rows[0].utility, (d.household.gasMonthly + d.household.waterMonthly) * 12);
-});
-test('panel lifetime, replacement timing and generation degradation are consistent', () => {
-  const d = fresh(); d.solar.panelReplace = false;
-  assert.ok(energyYear(d, 29).generation > 0); near(energyYear(d, 30).generation, 0); near(solarMaintenance(d.solar, 30), 0);
-  d.solar.panelReplace = true; assert.ok(solarMaintenance(d.solar, 30) >= d.solar.panelReplaceCost);
-  near(energyYear(d, 30).generation, energyYear(d, 0).generation);
+test('CSV has aligned purchase and annual rows and no hidden solar columns', () => {
+  const c = calcAll(fresh()), csv = csvFor(c), rows = csv.slice(1).split('\r\n').map(line => line.split(','));
+  assert.equal(rows.length, 62); assert.ok(rows.every(row => row.length === 19));
+  const header = rows[0].map(v => v.slice(1, -1));
+  assert.ok(!/売電|節電|太陽光/.test(csv));
+  near(Number(rows[1][header.indexOf('年末手元資金')]), c.initialCash);
+  near(Number(rows[1][header.indexOf('住宅ローン残高')]), c.loan);
+  near(Number(rows[2][header.indexOf('光熱費（電気・ガス・水道）')]), c.rows[0].utility, 0.005);
+  near(Number(rows[61][header.indexOf('年末手元資金')]), c.rows[59].balance, 0.005);
 });
 test('property tax changes after relief years and respects 120m2/200m2 apportionment', () => {
   const d = fresh(); const pt = calcPropertyTax(d.housing, d.loan), c = calcAll(d);
@@ -421,8 +459,9 @@ test('deterministic varied scenarios preserve all accounting identities', () => 
     const d = fresh(); d.basic.income = random() * 1200; d.basic.spouseEnabled = random() > 0.3;
     d.basic.spouseAge = 25 + Math.floor(random() * 40); d.household.inflationRate = random() * 4;
     d.loan.years = 10 + Math.floor(random() * 41); d.loan.varRate1 = random() * 5; d.loan.varRate2 = random() * 5; d.loan.varRate3 = random() * 5;
-    d.loan.bonusAmount = random() * 20; d.loan.pamount = random() * 700; d.solar.battEnabled = random() > 0.5;
-    d.solar.monthlyUsage = random() * 1000; d.solar.funding = ['included', 'cash', 'loan'][i % 3];
+    d.loan.bonusAmount = random() * 20; d.loan.pamount = random() * 700;
+    d.household.electricMonthly = random() * 5; d.household.gasMonthly = random() * 2;
+    d.household.waterMonthly = random(); d.household.retUtility = i % 3 === 0 ? 0 : random() * 5;
     const c = calcAll(d); invariant(c); near(c.actualTotalRepay - c.loan, c.actualTotalInt, 1e-4);
   }
 });

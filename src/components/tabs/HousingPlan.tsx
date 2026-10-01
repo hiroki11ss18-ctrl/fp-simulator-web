@@ -126,7 +126,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
                   {fmtMan(totalCost)} <span className="text-base font-normal text-ink-sub">万円</span>
                 </div>
                 <div className="text-[11px] text-ink-sub mt-1">
-                  土地・建物・付帯・外構・諸費用・別途設備費の合計
+                  土地・建物・付帯・外構・諸費用の合計
                 </div>
               </div>
 
@@ -135,7 +135,7 @@ export default function HousingPlan({ data, update, calc: _calc }: { data: SimDa
                 <Row label="▲ 頭金（自己資金）" value={`-${fmtMan(h.down)}`} negative />
               </div>
               <div className="bg-status-ok/8 border border-status-ok/30 rounded-[8px] p-3 mt-2">
-                <div className="text-[11px] text-ink-label mb-0.5">借入予定額（現金払い設備を除く費用 − 頭金）</div>
+                <div className="text-[11px] text-ink-label mb-0.5">借入予定額（総費用 − 頭金）</div>
                 <div className="text-2xl font-bold tabular text-status-ok">
                   {fmtMan(netLoan)} <span className="text-sm font-normal text-ink-sub">万円</span>
                 </div>

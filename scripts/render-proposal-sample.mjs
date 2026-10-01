@@ -12,7 +12,7 @@ try {
   data.basic.customerName = '動作確認用サンプル';
   data.basic.date = '2026-09-22';
   data.housing.reviewRate = 2.75;
-  data.solar.monthlyUsage = 450;
+  data.household.electricMonthly = 1.5;
   data.suddenExpenses = [
     { id: 'travel', name: '家族旅行', amount: 20, cycleYears: 1, firstYear: 1, endYear: 60, once: false },
     { id: 'car', name: '車の買い替え', amount: 250, cycleYears: 8, firstYear: 8, endYear: 60, once: false },

@@ -4,7 +4,6 @@ import type { TabId } from './components/Header';
 import BasicInfo from './components/tabs/BasicInfo';
 import HousingPlan from './components/tabs/HousingPlan';
 import LoanPlan from './components/tabs/LoanPlan';
-import SolarBattery from './components/tabs/SolarBattery';
 import Maintenance from './components/tabs/Maintenance';
 import Lcc from './components/tabs/Lcc';
 import Summary, { downloadText } from './components/tabs/Summary';
@@ -29,6 +28,9 @@ function loadDraft(): SimData | null {
     if (!raw) return null;
     if (!localStorage.getItem('fp-sim:draft:before-2026-09')) localStorage.setItem('fp-sim:draft:before-2026-09', raw);
     const parsed = JSON.parse(raw);
+    if (parsed?.solar && !localStorage.getItem('fp-sim:draft:before-2026-10-utilities')) {
+      localStorage.setItem('fp-sim:draft:before-2026-10-utilities', raw);
+    }
     return normalizeData(parsed);
   } catch {
     draftLoadError = '保存済みの下書きを読み込めませんでした。元データは保持しています。バックアップからの復元を確認してください。';
@@ -140,7 +142,7 @@ export default function App() {
     const html = '<!DOCTYPE html>' + renderToStaticMarkup(<html lang="ja"><head><meta charSet="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>ライフプラン提案書 {data.basic.customerName}</title></head><body><PrintProposal data={data} calc={calc} /></body></html>);
     downloadText('FP提案書_' + data.basic.date + '.html', html, 'text/html;charset=utf-8');
   };
-  const exportData = () => downloadText('FP入力データ_' + data.basic.date + '.json', JSON.stringify({ schemaVersion: 2, exportedAt: new Date().toISOString(), data }, null, 2), 'application/json');
+  const exportData = () => downloadText('FP入力データ_' + data.basic.date + '.json', JSON.stringify({ schemaVersion: 3, exportedAt: new Date().toISOString(), data }, null, 2), 'application/json');
   const importData = async (file?: File) => {
     if (!file) return;
     try {
@@ -158,7 +160,6 @@ export default function App() {
       case 'basic':   return <BasicInfo data={data} update={update} />;
       case 'housing': return <HousingPlan data={data} update={update} calc={calc} />;
       case 'loan':    return <LoanPlan data={data} update={update} calc={calc} />;
-      case 'solar':   return <SolarBattery data={data} update={update} calc={calc} />;
       case 'maint':   return <Maintenance data={data} update={update} calc={calc} />;
       case 'lcc':     return <Lcc data={data} update={update} calc={calc} />;
       case 'summary': return <Summary data={data} calc={calc} onPrint={() => handlePrint()} onExport={exportProposal} />;

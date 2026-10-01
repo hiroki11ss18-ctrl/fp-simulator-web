@@ -3,14 +3,13 @@ import type { SimData, CalcResult } from '../types';
 import { fmt } from '../lib/format';
 import { buildOverview } from '../lib/planning';
 import { PROPOSAL_STYLES } from '../lib/proposalStyles';
-import { ENERGY_SOURCE } from '../lib/energy';
 import { EDUCATION_SOURCE, childrenOf } from '../lib/education';
 import { lookupManualSalary, calcPropertyTax } from '../hooks/useCalculations';
 import { HorizonTable, MoneyBridge, MonthlyBudget, BalancePlot, AnnualTable, LifeStageExpenses } from './PlanResults';
 
 const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResult }>(({ data, calc }, ref) => {
   const view = useMemo(() => buildOverview(data, calc), [data, calc]);
-  const b = data.basic, l = data.loan, s = data.solar;
+  const b = data.basic, l = data.loan, hh = data.household;
   const h = data.housing, pt = calcPropertyTax(h, l);
   const rates = l.loanType === 'fix' ? [l.fixRate1, l.fixRate2, l.fixRate3] : [l.varRate1, l.varRate2, l.varRate3];
   const periods = l.loanType === 'fix' ? [l.fixPeriod1, l.fixPeriod2] : [l.varPeriod1, l.varPeriod2];
@@ -32,10 +31,8 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
     ['固定資産税の仮評価額', `建物 ${fmt(pt.buildVal)}万円（${h.propTaxBuildingValue === null ? `${h.buildArea}坪×約${fmt(h.propTaxBuildingUnitValue, 4)}万円/坪` : '手動'}） / 土地 ${fmt(pt.landVal)}万円（${h.propTaxLandValue === null ? `${h.landArea}坪×約${fmt(h.propTaxLandUnitValue, 4)}万円/坪` : '手動'}）`],
     ['固定資産税等・年額', `軽減${pt.reductionYears}年間 ${fmt(pt.during, 2)}万円 / 以後 ${fmt(pt.after, 2)}万円（都市計画税${h.cityPlanningTaxEnabled ? '含む' : 'なし'}・評価替え未反映）`],
     ['物価上昇率', data.household.inflationRate + '%/年（対象費用に複利適用）'],
-    ['太陽光・蓄電池', s.enabled ? s.solarKw + 'kW / 蓄電池 ' + (s.battEnabled ? s.battCapacity + 'kWh' : 'なし') : 'なし'],
-    ['設備費の扱い', ({ included: '建物等の見積に含む', cash: '別途現金', loan: '別途住宅ローン' })[s.funding] + ' / ' + fmt(calc.solarInitial) + '万円'],
-    ['電気・売電', s.monthlyUsage + 'kWh/月 / 昼' + s.elecPriceDay + '円・夜' + s.elecPriceNight + '円 / 売電' + Math.min(s.fitStepYears, s.fitYears) + '年まで' + s.fitRate + '円、' + (s.fitStepYears < s.fitYears ? s.fitYears + '年まで' + s.fitRateMiddle + '円、' : '') + 'FIT後' + s.fitRateAfter + '円'],
-    ['設備更新の仮定', '発電低下' + s.degradationPct + '%/年、パネル' + s.panelLifeYears + '年で' + (s.panelReplace ? fmt(s.panelReplaceCost) + '万円更新' : '利用終了')],
+    ['現役中の光熱費（月額）', '電気 ' + fmt(hh.electricMonthly, 2) + '万円 / ガス・灯油 ' + fmt(hh.gasMonthly, 2) + '万円 / 水道 ' + fmt(hh.waterMonthly, 2) + '万円（現在価格）'],
+    ['退職後の光熱費（月額）', fmt(hh.retUtility > 0 ? hh.retUtility : hh.electricMonthly + hh.gasMonthly + hh.waterMonthly, 2) + '万円（現在価格・' + (hh.retUtility > 0 ? '合計額を指定' : '現役中と同額') + '）'],
   ];
   return <div ref={ref} className="fp-proposal">
     <style dangerouslySetInnerHTML={{ __html: PROPOSAL_STYLES }} />
@@ -50,7 +47,7 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
       <h2>手元資金の推移</h2><BalancePlot calc={calc} />
       <MoneyBridge calc={calc} years={data.simYears} />
       <p className="plan-note">預貯金として残るお金の試算です。不動産売却価値や未受取の保険積立は含みません。残る借入は別表示。マイナスは資金不足で、追加融資は自動計上しません。年末時点の計算のため、年内の大きな支払いへの備えは別途必要です。</p>
-      <footer className="proposal-footer">金額は万円・表示のみ四捨五入。入力条件に基づく概算で、将来の収支を保証するものではありません。FPシミュレーター 計算仕様2026.09</footer>
+      <footer className="proposal-footer">金額は万円・表示のみ四捨五入。入力条件に基づく概算で、将来の収支を保証するものではありません。FPシミュレーター 計算仕様2026.10</footer>
     </section>
     <section className="proposal-page">
       <header className="proposal-header"><h2>購入後1年目の月額予算</h2><span>{b.customerName || 'お客様'} 様</span></header>
@@ -79,13 +76,13 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
       {!data.savingsInsurances.length && <p>設定なし</p>}
       <h3>計算上の注記</h3><ul className="assumptions-list">{calc.warnings.map(w => <li key={w}>{w}</li>)}</ul>
       <h3>参考資料</h3>
-      <p className="plan-note"><a href={ENERGY_SOURCE}>環境省 令和5年度家庭CO2統計 図1-62</a> / <a href="https://www.jpea.gr.jp/faq/563/">JPEA 発電量の目安</a> / <a href={EDUCATION_SOURCE}>文部科学省 令和5年度学習費調査・訂正後</a> / <a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1211-1.htm">国税庁 住宅ローン控除</a> / <a href="https://www.city.izumo.shimane.jp/www/contents/1595294633348/index.html">出雲市 固定資産税</a>。参照確認：2026年9月。</p>
+      <p className="plan-note"><a href={EDUCATION_SOURCE}>文部科学省 令和5年度学習費調査・訂正後</a> / <a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1211-1.htm">国税庁 住宅ローン控除</a> / <a href="https://www.city.izumo.shimane.jp/www/contents/1595294633348/index.html">出雲市 固定資産税</a>。参照確認：2026年9月。</p>
       <footer className="proposal-footer">この試算は意思決定を補助するもので、融資審査・税務判断・将来収入の確約ではありません。金利・家族構成・進路・料金・制度が変わったときは更新してください。</footer>
     </section>
     {chunks.map((rows, i) => <section className="proposal-page" key={i}>
       <header className="proposal-header"><h2>年次収支 / {rows[0].year}〜{rows[rows.length - 1].year}年後</h2><span>単位：万円</span></header>
       <AnnualTable rows={rows} />
-      <p className="plan-note">収入＝給与・年金・退職金・控除・保険満期受取・売電。住宅ローンには繰上返済を含みます。その他支出＝生活費・他ローン・保険料・節電後の光熱費・教育費・税・修繕・予定支出。年齢は各年終了時点。</p>
+      <p className="plan-note">収入＝給与・年金・退職金・控除・保険満期受取。住宅ローンには繰上返済を含みます。その他支出＝生活費・他ローン・保険料・光熱費・教育費・税・修繕・予定支出。年齢は各年終了時点。</p>
       <footer className="proposal-footer">{b.customerName || 'お客様'} 様 / {b.date} / 入力条件に基づく年末残高の試算</footer>
     </section>)}
   </div>;

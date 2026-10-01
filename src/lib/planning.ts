@@ -1,5 +1,5 @@
 import type { CalcResult, SimData, YearRow } from '../types';
-import { clamp } from './energy';
+import { clamp } from './math';
 
 export const HORIZONS = [30, 40, 50, 60] as const;
 
@@ -14,15 +14,10 @@ export function makeStressData(data: SimData): SimData {
   for (const key of ['varRate1', 'varRate2', 'varRate3', 'fixRate1', 'fixRate2', 'fixRate3'] as const)
     d.loan[key] = clamp(d.loan[key] + d.stress.rateAdd, 0, 100);
   const expenseFactor = 1 + clamp(d.stress.expenseAddPct, 0, 100) / 100;
-  const exclude = new Set(['otherLoan', 'otherLoanBalance', 'otherLoanRate', 'otherLoanMonths', 'inflationRate', 'electricMonthly']);
+  const exclude = new Set(['otherLoan', 'otherLoanBalance', 'otherLoanRate', 'otherLoanMonths', 'inflationRate', 'utilityInputVersion']);
   for (const key of Object.keys(d.household) as (keyof typeof d.household)[])
     if (!exclude.has(key)) d.household[key] *= expenseFactor;
-  d.solar.elecPriceDay *= expenseFactor; d.solar.elecPriceNight *= expenseFactor;
-  d.solar.baseChargeMonthly *= expenseFactor;
-  if (d.solar.elecBillManual !== null) d.solar.elecBillManual *= expenseFactor;
-  d.household.electricMonthly *= expenseFactor;
   d.maint.items.forEach(i => { i.cost *= expenseFactor; });
-  for (const key of ['powerconCost', 'battReplaceCost', 'solarMaintCost', 'panelReplaceCost'] as const) d.solar[key] *= expenseFactor;
   d.suddenExpenses.forEach(e => { e.amount *= expenseFactor; });
   for (const key of Object.keys(d.educationCosts)) d.educationCosts[key] *= expenseFactor;
   d.basic.aloneMonthly *= expenseFactor;
@@ -35,7 +30,7 @@ export function buildLifeStageExpenses(data: SimData, calc: CalcResult) {
     { label: '生活費・掛捨保険', value: (r: YearRow) => r.living - r.insurancePremium - r.otherLoanPay },
     { label: '住宅以外のローン', value: (r: YearRow) => r.otherLoanPay },
     { label: '貯蓄型・学資保険の払込', value: (r: YearRow) => r.insurancePremium },
-    { label: '光熱費（節電後）', value: (r: YearRow) => r.utility },
+    { label: '光熱費（電気・ガス・水道）', value: (r: YearRow) => r.utility },
     { label: '固定資産税等', value: (r: YearRow) => r.propTax },
     { label: '教育・仕送り', value: (r: YearRow) => r.eduCost },
     { label: '修繕・設備更新', value: (r: YearRow) => r.maintCost },
@@ -61,11 +56,11 @@ export function buildOverview(data: SimData, calc: CalcResult) {
   const first = calc.rows[0];
   const chosen = calc.rows.slice(0, data.simYears);
   const reserve = chosen.reduce((sum, r) => sum + r.maintCost + r.sudden, 0) / data.simYears / 12;
-  const regularIncome = (first.wage + first.pension + first.solarSale) / 12;
+  const regularIncome = (first.wage + first.pension) / 12;
   const monthlyItems = [
     { label: '住宅ローン（賞与返済を月割）', amount: (first.loanPay - first.prepaid) / 12 },
     { label: '生活費・保険・他ローン', amount: first.living / 12 },
-    { label: '光熱費（節電後）', amount: first.utility / 12 },
+    { label: '光熱費（電気・ガス・水道）', amount: first.utility / 12 },
     { label: '教育・仕送り', amount: first.eduCost / 12 },
     { label: '固定資産税等の積立', amount: first.propTax / 12 },
     { label: '修繕・旅行・車などの積立', amount: reserve },

@@ -36,21 +36,20 @@ export default function Lcc({ data, update, calc }: { data: SimData; update: (p:
     </section>
     <section className="plan-section">
       <h2>光熱費・物価</h2><div className="form-grid">
-        <Field label="太陽光導入前の電気代" hint="太陽光・蓄電池の電気代と共通">
-          <NumInput value={calc.effectiveElecBill} onChange={v => update({ household: { ...h, electricMonthly: 0 }, solar: { ...data.solar, elecBillManual: v } })} suffix="万円/月" step={0.1} />
-          <button className="text-xs text-accent-blue mt-1" onClick={() => update({ household: { ...h, electricMonthly: 0 }, solar: { ...data.solar, elecBillManual: null } })}>使用量からの計算に戻す</button>
+        <Field label="電気代" hint="世帯全体 / 現在価格の月平均">
+          <NumInput value={h.electricMonthly} onChange={v => set({ electricMonthly: v })} suffix="万円/月" step={0.1} />
         </Field>
         <Field label="ガス・灯油"><NumInput value={h.gasMonthly} onChange={v => set({ gasMonthly: v })} suffix="万円/月" step={0.1} /></Field>
         <Field label="水道"><NumInput value={h.waterMonthly} onChange={v => set({ waterMonthly: v })} suffix="万円/月" step={0.1} /></Field>
-        <Field label="物価上昇率" hint="生活・光熱・教育・修繕・予定支出に適用。借入・保険積立・税評価額・売電単価は対象外。"><NumInput value={h.inflationRate} onChange={v => set({ inflationRate: v })} suffix="%/年" max={20} step={0.1} /></Field>
+        <Field label="物価上昇率" hint="生活・光熱・教育・修繕・予定支出に適用。借入・保険積立・税評価額は対象外。"><NumInput value={h.inflationRate} onChange={v => set({ inflationRate: v })} suffix="%/年" max={20} step={0.1} /></Field>
       </div>
-      <p className="plan-note">初年度の光熱費は節電後 {fmt(calc.rows[0].utility / 12, 2)} 万円/月。売電は別の収入です。オール電化の場合も使用量・料金を確認し、ガス・灯油を0円にしてください。</p>
+      <p className="plan-note">初年度の光熱費合計 {fmt(calc.rows[0].utility / 12, 2)} 万円/月。電気・ガス・灯油・水道の月平均額を計上し、物価上昇率を反映します。初期値は仮予算です。</p>
     </section>
     <section className="plan-section">
       <div className="section-heading"><h2>退職後の生活費</h2><span>世帯全体 / 現在価格の月額</span></div>
       <p className="plan-note mb-4">世帯主が{b.retireAge}歳になった年からの生活費・掛捨保険です。配偶者が就業中でもこの金額へ切り替えます。将来の物価上昇は別途加算し、住宅ローン・教育費・税金・旅行・修繕は別に計上します。</p>
       {renderFields(retiredFields)}
-      <div className="form-grid mt-4"><Field label="退職後の光熱費合計（節電前）" hint="0は現役期と同額。太陽光の節電額を別途差し引きます。"><NumInput value={h.retUtility} onChange={v => set({ retUtility: v })} suffix="万円/月" step={0.1} /></Field></div>
+      <div className="form-grid mt-4"><Field label="退職後の光熱費合計" hint="電気・ガス・灯油・水道の合計（現在価格）。0は現役中と同額。"><NumInput value={h.retUtility} onChange={v => set({ retUtility: v })} suffix="万円/月" step={0.1} /></Field></div>
     </section>
     <section className="plan-section">
       <div className="section-heading"><h2>旅行・車の買い替え・予定支出</h2><span>{data.simYears}年間合計 {fmt(calc.lifeExpSudden)}万円</span></div>

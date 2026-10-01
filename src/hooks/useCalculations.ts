@@ -1,12 +1,11 @@
 import { useMemo } from 'react';
 import type { SimData, CalcResult, YearRow, LoanPlan, HouseType } from '../types';
 import { DEFAULT_DATA } from '../lib/defaults';
-import { energyYear, solarInitialCost, solarMaintenance, clamp } from '../lib/energy';
+import { clamp } from '../lib/math';
 import { calcEdu, eduAnnualByAge, childrenOf, childEducation } from '../lib/education';
 import { occursInYear } from '../lib/suddenExpenses';
 import { loanSchedule } from '../lib/loans';
 import { propertyAssessment } from '../lib/propertyAssessment';
-export { solarMonthlyGenArr } from '../lib/energy';
 
 // ─── 月返済額（元利均等）───
 export function calcMonthly(principal: number, rate: number, years: number): number {
@@ -315,15 +314,12 @@ export function lookupManualSalary(arr: number[], targetAge: number): number {
 
 // ─── メイン計算 ───
 export function calcAll(data: SimData): CalcResult {
-  const { basic: b, housing: h, loan: l, solar: s, household: hh } = data;
+  const { basic: b, housing: h, loan: l, household: hh } = data;
   const startYear = Number(b.date?.slice(0, 4)) || new Date().getFullYear();
   const warnings: string[] = [];
   const miscAmt = h.miscMode === '100' ? h.building : h.building * h.miscPct / 100;
-  const solarInitial = solarInitialCost(s);
-  const baseCost = h.land + h.building + h.fuka + h.exterior + miscAmt;
-  const totalCost = baseCost + (s.funding === 'included' ? 0 : solarInitial);
-  const mortgageCost = baseCost + (s.funding === 'loan' ? solarInitial : 0);
-  const loanAuto = Math.max(0, mortgageCost - h.down);
+  const totalCost = h.land + h.building + h.fuka + h.exterior + miscAmt;
+  const loanAuto = Math.max(0, totalCost - h.down);
   const loanMan = h.actualLoan > 0 ? h.actualLoan : loanAuto;
   const cashRequired = Math.max(0, totalCost - loanMan);
   const initialSavings = b.savings + (b.spouseEnabled ? b.spouseSavings : 0);
@@ -332,8 +328,6 @@ export function calcAll(data: SimData): CalcResult {
   const monthly = lc.phaseMonthly.find(v => v > 0) ?? 0;
   const repaymentYears = loanMan > 0 ? Math.ceil(lc.completionMonth / 12) : 0;
   const pt = calcPropertyTax(h, l);
-  const firstEnergy = energyYear(data);
-  const postEnergy = energyYear({ ...data, solar: { ...s, fitYears: 0 } });
   const pensionM = b.pensionMonthly ?? estimatePensionMonthly(b.income, Math.max(0, b.retireAge - 22)) * 0.9;
   const spPensionM = b.spouseEnabled
     ? b.spousePensionMonthly ?? estimatePensionMonthly(b.spouseIncome, Math.max(0, b.spouseRetireAge - 22)) * 0.9 : 0;
@@ -356,7 +350,7 @@ export function calcAll(data: SimData): CalcResult {
   const rows: YearRow[] = [];
 
   if (initialCash < 0) warnings.push('購入時の自己資金が不足しています。借入額と初期費用を再確認してください。');
-  if (loanMan > mortgageCost) warnings.push('借入額が住宅・ローン対象設備費を上回っています。超過借入分は使途未確認のため手元資金に加えていません。');
+  if (loanMan > totalCost) warnings.push('借入額が住宅の総費用を上回っています。超過借入分は使途未確認のため手元資金に加えていません。');
   if (h.actualLoan > 0 && Math.abs(h.actualLoan - loanAuto) > 0.01) warnings.push('実借入額を優先し、総費用との差額を貯蓄から支出します。表示上の頭金とは一致しない場合があります。');
   if (l.years < 1 || l.years > 60 || !Number.isInteger(l.years)) warnings.push('返済期間は1〜60年の整数が必要です。未確定の入力では提案に使用しないでください。');
   if ((l.pamount > 0 && (l.pyear < 1 || l.pyear > l.years)) || (l.pamount2 > 0 && (l.pyear2 < 1 || l.pyear2 > l.years)))
@@ -379,14 +373,6 @@ export function calcAll(data: SimData): CalcResult {
   if (l.taxHouseType === 'general' && l.taxMoveInYear >= 2028) warnings.push('2028年以降の省エネ基準適合住宅の経過措置は個別確認が必要です。控除は計上していません。');
   if (h.propTaxBuildingValue === null || h.propTaxLandValue === null)
     warnings.push('固定資産税は出雲市の税率・仮評価額による概算です。評価替え・建物の経年減価は含みません。市外の物件は別途確認してください。');
-  if (s.enabled && s.solarKw > 0) {
-    if (s.fitStepYears > s.fitYears) warnings.push('売電の第1段階終了がFIT終了より後です。FIT終了後単価が優先されるため、契約期間を修正してください。');
-    warnings.push(s.funding === 'included' ? '太陽光・蓄電池の初期費用は建物等の見積に含む設定です。見積で二重計上・計上漏れがないか確認してください。'
-      : s.funding === 'loan' ? '太陽光・蓄電池の初期費用を住宅費に加算しています。実借入額が手動の場合は借入増額の確認が必要です。' : '太陽光・蓄電池の初期費用を現金支出として購入時に計上しています。');
-    warnings.push('発電・自家消費は月別平均による概算です。天候・積雪・影・機器の実効容量・料金改定を保証しません。売電契約の単価と期間をご確認ください。');
-    if (s.battEnabled && s.battCost <= 0) warnings.push('蓄電池が有効ですが初期費用は0円です。見積に含むか確認してください。');
-  }
-  if (s.battEnabled && (!s.enabled || s.solarKw <= 0)) warnings.push('蓄電池単独での運用は未対応です。太陽光が無効のため、設備費・効果は計上していません。');
   if (hh.inflationRate === 0) warnings.push('物価上昇率は0%です。長期の生活費・教育費・修繕費が変わらない仮定になっています。');
   if (!(data.suddenExpenses ?? []).some(e => /旅行/.test(e.name) && e.amount > 0)) warnings.push('旅行の予定支出が未設定です。希望がある場合は金額を追加してください。');
   if (!(data.suddenExpenses ?? []).some(e => /車.*(替|購入)/.test(e.name) && e.amount > 0)) warnings.push('車の買い替えが未設定です。月々の車両費と分けて確認してください。');
@@ -443,20 +429,16 @@ export function calcAll(data: SimData): CalcResult {
       if (si.payoutYear === year) { insurancePayout += si.payoutAmount; events.push((si.name || '貯蓄型保険') + ' 満期'); }
     }
     const living = (isWork ? workLiving : retLiving) * 12 * factor + insurancePremium + otherLoanPay;
-    const energy = energyYear(data, y);
-    const utilityBaseline = (isWork || hh.retUtility <= 0 ? energy.baselineMonthly + hh.gasMonthly + hh.waterMonthly : hh.retUtility) * 12;
-    const solarSaving = Math.min(energy.saving, utilityBaseline) * factor;
-    const utility = Math.max(0, utilityBaseline * factor - solarSaving);
-    const solarSale = energy.sale;
+    const utilityMonthly = isWork || hh.retUtility <= 0 ? hh.electricMonthly + hh.gasMonthly + hh.waterMonthly : hh.retUtility;
+    const utility = utilityMonthly * 12 * factor;
     const propTax = y < pt.reductionYears ? pt.during : pt.after;
     const eduCost = kids.reduce((a, k) => a + childEducation(k, y, b, costs), 0) * factor;
-    let maintCost = solarMaintenance(s, year) * factor;
+    let maintCost = 0;
     for (const item of data.maint.items) {
       if (item.enabled && item.cycleYears > 0 && year % Math.max(1, Math.round(item.cycleYears)) === 0) {
         maintCost += item.cost * factor; events.push(item.name);
       }
     }
-    if (solarMaintenance(s, year) > 0) events.push('太陽光設備の点検・更新');
     let sudden = 0;
     for (const e of data.suddenExpenses ?? []) if (occursInYear(e, year)) {
       sudden += e.amount * factor; events.push(e.name || '予定支出');
@@ -474,12 +456,12 @@ export function calcAll(data: SimData): CalcResult {
     }
     const income = wage + pension + retBonus + insurancePayout + taxBack;
     const totalOut = loanPay + living + utility + propTax + eduCost + maintCost + sudden;
-    const net = income + solarSale - totalOut;
+    const net = income - totalOut;
     balance += net;
     rows.push({
       year, calYear: startYear + year, age: b.age + year, income, wage, pension, retBonus,
       insurancePayout, insurancePremium, loanPay, prepaid: mortgage.prepaid, otherLoanPay, otherLoanBalance: otherBalance,
-      living, utility, propTax, eduCost, maintCost, solarBenefit: solarSale, solarSale, solarSaving,
+      living, utility, propTax, eduCost, maintCost,
       leaveIncomeLoss, sudden, taxBack, net, balance, totalOut, loanBalance: mortgage.balance,
       status: judgeStatus(net, eduCost + maintCost + sudden), events,
     });
@@ -487,18 +469,17 @@ export function calcAll(data: SimData): CalcResult {
   const within = rows.slice(0, data.simYears);
   const sum = (key: keyof YearRow) => within.reduce((a, r) => a + (typeof r[key] === 'number' ? r[key] as number : 0), 0);
   return {
-    rows, initialSavings, initialCash, cashRequired, solarInitial, warnings,
+    rows, initialSavings, initialCash, cashRequired, warnings,
     loan: loanMan, loanAuto, miscAmt, totalCost, monthly,
     monthlyPhase1: lc.phaseMonthly[0], monthlyPhase2: lc.phaseMonthly[1], monthlyPhase3: lc.phaseMonthly[2],
     repaymentYears, completionAge: b.age + repaymentYears, actualTotalRepay: lc.totalPaid, actualTotalInt: lc.totalInterest,
     taxBorrowLimit, taxDeductionYears, taxDeductionTotal: taxDeductionMain + taxDeductionSpouse, taxDeductionMain, taxDeductionSpouse,
     totalUtility: sum('utility'), totalPropTax: sum('propTax'), totalEdu: sum('eduCost'), totalMaint: sum('maintCost'),
-    totalSolar: sum('solarSaving') + sum('solarSale'), totalLiving: sum('living'),
+    totalLiving: sum('living'),
     lccGrand: cashRequired + sum('totalOut'),
-    solarAnnualFit: firstEnergy.benefit, solarAnnualPost: postEnergy.benefit, annualKwh: firstEnergy.generation,
-    afterBill: firstEnergy.afterMonthly, effectiveElecBill: firstEnergy.baselineMonthly, pensionM, spPensionM,
+    pensionM, spPensionM,
     lifeIncWage: sum('wage'), lifeIncPension: sum('pension'), lifeIncRetBonus: sum('retBonus'), lifeIncTaxBack: sum('taxBack'),
-    lifeIncSolar: sum('solarSale'), lifeIncSiPayout: sum('insurancePayout'), lifeLeaveIncomeLoss: sum('leaveIncomeLoss'),
+    lifeIncSiPayout: sum('insurancePayout'), lifeLeaveIncomeLoss: sum('leaveIncomeLoss'),
     lifeExpLoanPay: sum('loanPay'), lifeExpPropTax: sum('propTax'), lifeExpLiving: sum('living') - sum('insurancePremium'),
     lifeExpUtility: sum('utility'), lifeExpEdu: sum('eduCost'), lifeExpMaint: sum('maintCost'),
     lifeExpSudden: sum('sudden'), lifeExpSiPaid: sum('insurancePremium'),
