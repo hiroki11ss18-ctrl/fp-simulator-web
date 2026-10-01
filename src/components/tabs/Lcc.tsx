@@ -1,8 +1,9 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { Field, NumInput, Select, TextInput } from '../ui';
-import type { SimData, CalcResult, HouseholdExpenses, SuddenExpense } from '../../types';
+import type { SimData, CalcResult, HouseholdExpenses, SuddenExpense, ExpenseCategory } from '../../types';
 import { fmt } from '../../lib/format';
 import { childrenOf, childEducation, EDUCATION_SOURCE, STUDY_YEARS } from '../../lib/education';
+import { expenseCategory } from '../../lib/suddenExpenses';
 
 const workFields: [keyof HouseholdExpenses, string][] = [
   ['food', '食費'], ['transport', '交通費'], ['daily', '日用品'], ['clothes', '衣服'], ['hobby', '娯楽・趣味'],
@@ -25,7 +26,7 @@ export default function Lcc({ data, update, calc }: { data: SimData; update: (p:
   const h = data.household, b = data.basic;
   const set = (patch: Partial<HouseholdExpenses>) => update({ household: { ...h, ...patch } });
   const updateExpense = (id: string, patch: Partial<SuddenExpense>) => update({ suddenExpenses: data.suddenExpenses.map(e => e.id === id ? { ...e, ...patch } : e) });
-  const addExpense = (name = '', cycle = 1) => update({ suddenExpenses: [...data.suddenExpenses, { id: crypto.randomUUID(), name, amount: 0, cycleYears: cycle, firstYear: cycle, endYear: 60, once: false }] });
+  const addExpense = (name = '', cycle = 1, category: ExpenseCategory = 'other') => update({ suddenExpenses: [...data.suddenExpenses, { id: crypto.randomUUID(), name, category, amount: 0, cycleYears: cycle, firstYear: cycle, endYear: 60, once: false }] });
   const renderFields = (fields: typeof workFields) => <div className="form-grid dense">{fields.map(([key, label]) => <Field key={key} label={label}><NumInput value={h[key]} onChange={v => set({ [key]: v })} step={0.1} suffix="万円/月" /></Field>)}</div>;
   return <div className="plan-layout">
     <section className="plan-section">
@@ -54,13 +55,14 @@ export default function Lcc({ data, update, calc }: { data: SimData; update: (p:
     <section className="plan-section">
       <div className="section-heading"><h2>旅行・車の買い替え・予定支出</h2><span>{data.simYears}年間合計 {fmt(calc.lifeExpSudden)}万円</span></div>
       <div className="flex flex-wrap gap-2 mb-4">
-        <button className="action-button" onClick={() => addExpense('家族旅行', 1)}><Plus size={16} />旅行</button>
-        <button className="action-button" onClick={() => addExpense('車の買い替え', 8)}><Plus size={16} />車の買い替え</button>
+        <button className="action-button" onClick={() => addExpense('家族旅行', 1, 'travel')}><Plus size={16} />旅行</button>
+        <button className="action-button" onClick={() => addExpense('車の買い替え', 8, 'car')}><Plus size={16} />車の買い替え</button>
         <button className="action-button" onClick={() => addExpense()}><Plus size={16} />予定支出</button>
       </div>
       {data.suddenExpenses.length === 0 && <p className="plan-note">予定支出は未設定です。</p>}
-      {data.suddenExpenses.map(e => <div className="event-row" key={e.id}>
+      {data.suddenExpenses.map(e => <div className="event-row planned-expense-row" key={e.id}>
         <Field label="支出名"><TextInput value={e.name} onChange={name => updateExpense(e.id, { name })} placeholder="家族旅行など" /></Field>
+        <Field label="分類"><Select value={expenseCategory(e)} onChange={v => updateExpense(e.id, { category: v as ExpenseCategory })} options={[{ value: 'travel', label: '旅行' }, { value: 'car', label: '車' }, { value: 'other', label: 'その他' }]} /></Field>
         <Field label="1回の費用"><NumInput value={e.amount} onChange={amount => updateExpense(e.id, { amount })} step={1} suffix="万円" /></Field>
         <Field label="最初の支出"><NumInput value={e.firstYear ?? e.cycleYears} onChange={firstYear => updateExpense(e.id, { firstYear: Math.round(firstYear) })} min={1} max={60} step={1} suffix="年目" /></Field>
         <Field label="繰り返し"><Select value={e.once ? 'once' : 'repeat'} onChange={v => updateExpense(e.id, { once: v === 'once' })} options={[{ value: 'repeat', label: '定期的' }, { value: 'once', label: '1回だけ' }]} /></Field>

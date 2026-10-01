@@ -1,6 +1,7 @@
 import { DEFAULT_DATA } from './defaults';
 import type { SimData } from '../types';
 import { clamp } from './math';
+import { expenseCategory } from './suddenExpenses';
 import { legacyAssessment, BUILDING_ASSESSMENT_RATIO, LAND_ASSESSMENT_RATIO,
   BUILD_EVAL_PER_TSUBO_FALLBACK, LAND_EVAL_PER_TSUBO_FALLBACK } from './propertyAssessment';
 
@@ -53,7 +54,7 @@ export function normalizeData(raw: unknown): SimData {
   const templateExpense = { id: '', name: '', amount: 0, cycleYears: 1, firstYear: 1, endYear: 60, once: false };
   d.suddenExpenses = d.suddenExpenses.filter(v => v && typeof v === 'object').map((e, i) => {
     const clean = mergeWithDefaults(templateExpense, e);
-    return { ...clean, id: clean.id || 'expense-' + i,
+    return { ...clean, id: clean.id || 'expense-' + i, category: expenseCategory({ name: clean.name, category: e.category }),
       firstYear: Math.max(1, Math.round(e.firstYear === undefined ? clean.cycleYears : clean.firstYear)) };
   });
   d.savingsInsurances = d.savingsInsurances.filter(v => v && typeof v === 'object').map((si, i) => {

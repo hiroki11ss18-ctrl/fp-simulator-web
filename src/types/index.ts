@@ -148,6 +148,8 @@ export interface HouseholdExpenses {
 }
 
 // ─── 急な出費（フリー入力） ───
+export type ExpenseCategory = 'travel' | 'car' | 'other';
+
 export interface SuddenExpense {
   id: string;
   name: string;
@@ -156,6 +158,7 @@ export interface SuddenExpense {
   firstYear?: number;
   endYear?: number;
   once?: boolean;
+  category?: ExpenseCategory;
 }
 
 // ─── 貯蓄型保険（学資・養老・個人年金など） ───
@@ -196,6 +199,8 @@ export interface YearRow {
   maintCost: number;
   leaveIncomeLoss: number; // 産休・育休による収入減
   sudden: number;     // 急な出費（年間合計）
+  plannedCosts: Record<ExpenseCategory, number>; // suddenの内訳（再加算しない）
+  carRunningCost: number; // livingに含む車の維持費・自動車保険
   taxBack: number;    // 住宅ローン控除（年額）
   retBonus: number;   // 退職金
   net: number;        // 年収支

@@ -1,39 +1,15 @@
 import { forwardRef, useMemo } from 'react';
 import type { SimData, CalcResult } from '../types';
 import { fmt } from '../lib/format';
-import { buildOverview } from '../lib/planning';
+import { buildOverview, buildExpenseTotals } from '../lib/planning';
 import { PROPOSAL_STYLES } from '../lib/proposalStyles';
-import { EDUCATION_SOURCE, childrenOf } from '../lib/education';
-import { lookupManualSalary, calcPropertyTax } from '../hooks/useCalculations';
-import { HorizonTable, MoneyBridge, MonthlyBudget, BalancePlot, AnnualTable, LifeStageExpenses } from './PlanResults';
+import { HorizonTable, MoneyBridge, BalancePlot, AnnualTable } from './PlanResults';
 
 const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResult }>(({ data, calc }, ref) => {
   const view = useMemo(() => buildOverview(data, calc), [data, calc]);
-  const b = data.basic, l = data.loan, hh = data.household;
-  const h = data.housing, pt = calcPropertyTax(h, l);
-  const rates = l.loanType === 'fix' ? [l.fixRate1, l.fixRate2, l.fixRate3] : [l.varRate1, l.varRate2, l.varRate3];
-  const periods = l.loanType === 'fix' ? [l.fixPeriod1, l.fixPeriod2] : [l.varPeriod1, l.varPeriod2];
+  const expenses = useMemo(() => buildExpenseTotals(data, calc), [data, calc]);
+  const b = data.basic;
   const chunks = [0, 20, 40].map(start => calc.rows.slice(start, start + 20));
-  const conditionRows = [
-    ['試算開始日・期間', b.date + ' / 最大60年間'],
-    ['現在の年齢', '世帯主 ' + b.age + '歳' + (b.spouseEnabled ? ' / 配偶者 ' + b.spouseAge + '歳' : '')],
-    ['年収＋賞与（額面）', '世帯主 ' + (b.age >= b.retireAge ? '退職済み' : fmt(b.salaryAuto ? b.income : lookupManualSalary(b.salaryManual, b.age)) + '＋' + fmt(b.annualBonusInc) + '万円') + ' / 配偶者 ' + (!b.spouseEnabled ? '対象外' : b.spouseAge >= b.spouseRetireAge ? '退職済み' : fmt(b.salSpouseAuto ? b.spouseIncome : lookupManualSalary(b.spouseSalaryManual, b.spouseAge)) + '＋' + fmt(b.spouseAnnualBonusInc) + '万円')],
-    ['給与手取り率', '世帯主 ' + b.takeHomePct + '% / 配偶者 ' + b.spouseTakeHomePct + '%'],
-    ['昇給設定', '世帯主 ' + (b.salaryAuto ? '自動 ' + b.incomeGrowth + '%' : '手動カーブ') + ' / 配偶者 ' + (b.salSpouseAuto ? '自動 ' + b.spouseGrowth + '%' : '手動カーブ')],
-    ['定年・手取り退職金', '世帯主 ' + b.retireAge + '歳 ' + fmt(b.retireBonus) + '万円 / 配偶者 ' + (b.spouseEnabled ? b.spouseRetireAge + '歳 ' + fmt(b.spouseRetireBonus) + '万円' : '対象外')],
-    ['月の手取り年金・開始年齢', fmt(calc.pensionM, 1) + '万円＋' + fmt(calc.spPensionM, 1) + '万円 / 各人' + b.pensionStartAge + '歳から'],
-    ['購入総額・実借入', fmt(calc.totalCost) + '万円 / ' + fmt(calc.loan) + '万円・' + l.years + '年'],
-    ['採用金利（第1・2・3期）', rates.map(r => fmt(r, 2) + '%').join(' / ') + '（' + periods[0] + '年、' + periods[1] + '年で変更）'],
-    ['審査用設定（返済額とは別）', '審査金利 ' + data.housing.reviewRate + '% / 比率 ' + data.housing.repRatio + '%'],
-    ['賞与返済・繰上返済', fmt(l.bonusAmount) + '万円×年' + l.bonusTimes + '回 / ' + l.pyear + '年目' + fmt(l.pamount) + '万円・' + l.pyear2 + '年目' + fmt(l.pamount2) + '万円（' + l.ptype + '）'],
-    ['他ローン', '残高 ' + fmt(data.household.otherLoanBalance) + '万円 / 月' + fmt(data.household.otherLoan, 1) + '万円 / 年利' + data.household.otherLoanRate + '% / 残高不明時' + data.household.otherLoanMonths + 'か月'],
-    ['住宅ローン控除', l.taxInclude ? '確認上限で計上 / 主 ' + l.taxAnnualCap + '万円・配偶者 ' + l.taxSpouseAnnualCap + '万円/年' : '資金計画に含めない'],
-    ['固定資産税の仮評価額', `建物 ${fmt(pt.buildVal)}万円（${h.propTaxBuildingValue === null ? `${h.buildArea}坪×約${fmt(h.propTaxBuildingUnitValue, 4)}万円/坪` : '手動'}） / 土地 ${fmt(pt.landVal)}万円（${h.propTaxLandValue === null ? `${h.landArea}坪×約${fmt(h.propTaxLandUnitValue, 4)}万円/坪` : '手動'}）`],
-    ['固定資産税等・年額', `軽減${pt.reductionYears}年間 ${fmt(pt.during, 2)}万円 / 以後 ${fmt(pt.after, 2)}万円（都市計画税${h.cityPlanningTaxEnabled ? '含む' : 'なし'}・評価替え未反映）`],
-    ['物価上昇率', data.household.inflationRate + '%/年（対象費用に複利適用）'],
-    ['現役中の光熱費（月額）', '電気 ' + fmt(hh.electricMonthly, 2) + '万円 / ガス・灯油 ' + fmt(hh.gasMonthly, 2) + '万円 / 水道 ' + fmt(hh.waterMonthly, 2) + '万円（現在価格）'],
-    ['退職後の光熱費（月額）', fmt(hh.retUtility > 0 ? hh.retUtility : hh.electricMonthly + hh.gasMonthly + hh.waterMonthly, 2) + '万円（現在価格・' + (hh.retUtility > 0 ? '合計額を指定' : '現役中と同額') + '）'],
-  ];
   return <div ref={ref} className="fp-proposal">
     <style dangerouslySetInnerHTML={{ __html: PROPOSAL_STYLES }} />
     <section className="proposal-page">
@@ -49,35 +25,21 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
       <p className="plan-note">預貯金として残るお金の試算です。不動産売却価値や未受取の保険積立は含みません。残る借入は別表示。マイナスは資金不足で、追加融資は自動計上しません。年末時点の計算のため、年内の大きな支払いへの備えは別途必要です。</p>
       <footer className="proposal-footer">金額は万円・表示のみ四捨五入。入力条件に基づく概算で、将来の収支を保証するものではありません。FPシミュレーター 計算仕様2026.10</footer>
     </section>
-    <section className="proposal-page">
-      <header className="proposal-header"><h2>購入後1年目の月額予算</h2><span>{b.customerName || 'お客様'} 様</span></header>
-      <MonthlyBudget overview={view} />
-      <p className="plan-note">初年度の年収・賞与等を12で割った平均で、賞与のない月の収支とは異なります。退職金・控除・満期受取を除外。修繕・旅行・車の積立は{data.simYears}年間の予定総額÷{data.simYears}年÷12。年次残高では積立を重ねて差し引かず、発生年に実際の支出を計上します。繰上返済は年次表で別途確認。生活防衛資金は{b.emergencyFundMonths}か月分・約{fmt(view.emergencyFund)}万円の仮目標です。</p>
-      <h2>お子さまの進路</h2>{childrenOf(b).map((k, i) => <p key={i}>第{i + 1}子 {k.age}歳 / 公立小学校・{k.mid}・{k.high}・{k.uni} / 下宿{k.alone}年・仕送り月{b.aloneMonthly}万円</p>)}
-      {b.kids === 0 && <p>お子さまの教育費は計上していません。</p>}
-      <footer className="proposal-footer">現役期・退職後の費用、旅行・車の買い替え、教育費が実際の希望と合っているかをご確認ください。</footer>
-    </section>
-    <section className="proposal-page">
-      <header className="proposal-header"><h2>現役中・退職後の支出</h2><span>{b.customerName || 'お客様'} 様</span></header>
-      <LifeStageExpenses overview={view} />
-      <footer className="proposal-footer">支出の期間平均です。年ごとの支払額と手元資金は、後半の年次収支をご参照ください。</footer>
-    </section>
-    <section className="proposal-page">
-      <header className="proposal-header"><h2>試算に採用した前提</h2><span>{b.customerName || 'お客様'} 様</span></header>
-      <h2>試算条件</h2><dl className="condition-list">{conditionRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-      <footer className="proposal-footer">年金・退職金は手取りで計上。給与は額面から入力した手取り率で概算します。税金・社会保険料の厳密な個別計算は行いません。</footer>
-    </section>
-    <section className="proposal-page">
-      <header className="proposal-header"><h2>予定支出と計算上の注記</h2><span>{b.date}</span></header>
-      <h3>旅行・車・一時支出</h3>
-      {data.suddenExpenses.length ? <table className="plan-table"><thead><tr><th>予定</th><th>現在価格・1回</th><th>時期・間隔</th></tr></thead><tbody>{data.suddenExpenses.map(e => <tr key={e.id}><th>{e.name || '名称未入力'}</th><td>{fmt(e.amount)}万円</td><td>{e.firstYear ?? e.cycleYears}年目から{e.once ? '1回のみ' : e.cycleYears + '年ごと・' + (e.endYear ?? 60) + '年目まで'}</td></tr>)}</tbody></table> : <p>未設定</p>}
-      <h3>貯蓄型保険</h3>
-      {data.savingsInsurances.map(si => <p key={si.id}>{si.name || '名称未入力'} / 月{fmt(si.monthly, 2)}万円を{si.payoutYear}年目まで払い、年末に{fmt(si.payoutAmount)}万円受取。</p>)}
-      {!data.savingsInsurances.length && <p>設定なし</p>}
-      <h3>計算上の注記</h3><ul className="assumptions-list">{calc.warnings.map(w => <li key={w}>{w}</li>)}</ul>
-      <h3>参考資料</h3>
-      <p className="plan-note"><a href={EDUCATION_SOURCE}>文部科学省 令和5年度学習費調査・訂正後</a> / <a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1211-1.htm">国税庁 住宅ローン控除</a> / <a href="https://www.city.izumo.shimane.jp/www/contents/1595294633348/index.html">出雲市 固定資産税</a>。参照確認：2026年9月。</p>
-      <footer className="proposal-footer">この試算は意思決定を補助するもので、融資審査・税務判断・将来収入の確約ではありません。金利・家族構成・進路・料金・制度が変わったときは更新してください。</footer>
+    <section className="proposal-page expense-totals-page">
+      <header className="proposal-header"><div><h2>{expenses.years}年間の支出総額・内訳</h2><p>{b.customerName || 'お客様'} 様 / 購入後1〜{expenses.years}年目末</p></div><span>単位：万円</span></header>
+      <div className="metric-grid">
+        <div className="metric"><span>{expenses.years}年間の支出合計</span><strong>{fmt(expenses.periodTotal)}<small>万円</small></strong></div>
+        <div className="metric"><span>購入時の現金支出</span><strong>{fmt(expenses.purchaseCash)}<small>万円</small></strong></div>
+        <div className="metric"><span>購入時を含む総支出</span><strong>{fmt(expenses.grandTotal)}<small>万円</small></strong></div>
+      </div>
+      <table className="plan-table expense-totals-table">
+        <thead><tr><th>支出の項目</th><th>含まれる費用</th><th>{expenses.years}年間の合計</th></tr></thead>
+        <tbody>{expenses.items.map(item => <tr key={item.key}><th>{item.label}</th><td>{item.detail}</td><td>{fmt(item.amount, 1)}</td></tr>)}</tbody>
+        <tfoot><tr className="strong-row"><th colSpan={2}>{expenses.years}年間の支出合計</th><td>{fmt(expenses.periodTotal, 1)}</td></tr></tfoot>
+      </table>
+      <p className="plan-note">設定した物価上昇率 {data.household.inflationRate}%/年と、退職後の生活費への切替を反映した支出の見込みです。月々の積立目安は重ねて加算していません。車の維持費・自動車保険は「車の費用」に含め、生活費からは除いています。</p>
+      <p className="plan-note">購入時の現金支出は住宅の総費用から実借入額を差し引いた額（下限0円）です。借入分は返済時に計上するため、住宅の購入総額をもう一度加算しません。表示は四捨五入のため、内訳の合計に端数差が出る場合があります。</p>
+      <footer className="proposal-footer">この集計は選択した{expenses.years}年間が対象です。後続の年次収支は従来どおり60年分を掲載しています。入力条件に基づく概算で、将来の支出を保証するものではありません。</footer>
     </section>
     {chunks.map((rows, i) => <section className="proposal-page" key={i}>
       <header className="proposal-header"><h2>年次収支 / {rows[0].year}〜{rows[rows.length - 1].year}年後</h2><span>単位：万円</span></header>

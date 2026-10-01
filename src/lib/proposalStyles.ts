@@ -35,6 +35,12 @@ export const PROPOSAL_STYLES = `
 .fp-proposal .money-bridge strong { font-size:12px; }
 .fp-proposal .split-ledger { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
 .fp-proposal .budget-table th { width:75%; }
+.fp-proposal .expense-totals-table th:first-child { width:27%; }
+.fp-proposal .expense-totals-table th:last-child { width:22%; }
+.fp-proposal .expense-totals-table th,.fp-proposal .expense-totals-table td { padding:10px 7px; }
+.fp-proposal .expense-totals-table tbody td:nth-child(2),.fp-proposal .expense-totals-table thead th:nth-child(2) { text-align:left; }
+.fp-proposal .expense-totals-table tbody td:nth-child(2) { font-size:10px; color:#52636d; }
+.fp-proposal .expense-totals-page .metric:last-child { border-top:2px solid #237f68; }
 .fp-proposal .life-stage-table caption { text-align:left; color:#52636d; font-size:11px; padding-bottom:10px; }
 .fp-proposal .life-stage-table th:first-child { width:48%; }
 .fp-proposal .life-stage-table th,.fp-proposal .life-stage-table td { padding:9px 8px; }

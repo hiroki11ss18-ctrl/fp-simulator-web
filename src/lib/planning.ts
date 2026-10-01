@@ -3,6 +3,26 @@ import { clamp } from './math';
 
 export const HORIZONS = [30, 40, 50, 60] as const;
 
+export function buildExpenseTotals(data: SimData, calc: CalcResult) {
+  const rows = calc.rows.slice(0, data.simYears);
+  const sum = (value: (row: YearRow) => number) => rows.reduce((total, row) => total + value(row), 0);
+  const items = [
+    { key: 'loan', label: '住宅ローン返済', detail: '元金・利息・賞与返済・繰上返済', amount: sum(r => r.loanPay) },
+    { key: 'living', label: '生活費・掛捨保険', detail: '食費・日用品・趣味・医療など（車関連を除く）', amount: sum(r => r.living - r.carRunningCost - r.otherLoanPay - r.insurancePremium) },
+    { key: 'utility', label: '光熱費', detail: '電気・ガス／灯油・水道', amount: sum(r => r.utility) },
+    { key: 'travel', label: '旅行費', detail: '予定支出で「旅行」に分類した費用', amount: sum(r => r.plannedCosts.travel) },
+    { key: 'car', label: '車の費用', detail: '維持費・自動車保険・買い替えなどの車の予定支出', amount: sum(r => r.carRunningCost + r.plannedCosts.car) },
+    { key: 'education', label: '教育費・学費', detail: '学校の費用・学習費・下宿の仕送り', amount: sum(r => r.eduCost) },
+    { key: 'tax', label: '固定資産税等', detail: '固定資産税・対象区域の都市計画税', amount: sum(r => r.propTax) },
+    { key: 'maintenance', label: '住まいの修繕費', detail: '建物のメンテナンス・設備更新', amount: sum(r => r.maintCost) },
+    { key: 'insurance', label: '貯蓄型・学資保険料', detail: '払込額の合計（満期受取は収入に計上）', amount: sum(r => r.insurancePremium) },
+    { key: 'otherLoan', label: '住宅以外のローン返済', detail: '入力済みの他ローン返済（車のローン等も含む）', amount: sum(r => r.otherLoanPay) },
+    { key: 'other', label: 'その他の予定支出', detail: '旅行・車以外の一時支出・定期支出', amount: sum(r => r.plannedCosts.other) },
+  ];
+  const periodTotal = sum(r => r.totalOut);
+  return { years: data.simYears, items, periodTotal, purchaseCash: calc.cashRequired, grandTotal: calc.cashRequired + periodTotal };
+}
+
 export function makeStressData(data: SimData): SimData {
   const d = structuredClone(data);
   const wageFactor = 1 - clamp(d.stress.incomeDropPct, 0, 100) / 100;

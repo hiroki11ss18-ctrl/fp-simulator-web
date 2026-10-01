@@ -10,8 +10,8 @@ const { calcAll, calcMonthly, calcMaxLoan, calcPropertyTax, getTaxBorrowLimit } 
 const { DEFAULT_DATA } = await server.ssrLoadModule('/src/lib/defaults.ts');
 const { loanSchedule } = await server.ssrLoadModule('/src/lib/loans.ts');
 const { normalizeData } = await server.ssrLoadModule('/src/lib/data.ts');
-const { buildOverview, buildLifeStageExpenses, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
-const { occursInYear } = await server.ssrLoadModule('/src/lib/suddenExpenses.ts');
+const { buildOverview, buildLifeStageExpenses, buildExpenseTotals, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
+const { occursInYear, expenseCategory } = await server.ssrLoadModule('/src/lib/suddenExpenses.ts');
 const { default: PrintProposal } = await server.ssrLoadModule('/src/components/PrintProposal.tsx');
 const { default: HousingPlan } = await server.ssrLoadModule('/src/components/tabs/HousingPlan.tsx');
 const { default: Summary, csvFor } = await server.ssrLoadModule('/src/components/tabs/Summary.tsx');
@@ -82,6 +82,8 @@ function invariant(c) {
     for (const value of Object.values(r)) if (typeof value === 'number') assert.ok(Number.isFinite(value));
     near(r.income, r.wage + r.pension + r.retBonus + r.taxBack + r.insurancePayout);
     near(r.totalOut, r.loanPay + r.living + r.utility + r.propTax + r.eduCost + r.maintCost + r.sudden);
+    near(r.sudden, r.plannedCosts.travel + r.plannedCosts.car + r.plannedCosts.other);
+    assert.ok(r.carRunningCost >= 0 && r.carRunningCost <= r.living + 1e-6);
     near(r.net, r.income - r.totalOut);
     balance += r.net; near(r.balance, balance, 1e-5);
     assert.ok(r.loanBalance >= 0 && r.utility >= 0);
@@ -267,7 +269,7 @@ test('all affected views and navigation omit solar and display ordinary utility 
     for (const word of ['太陽光', '蓄電池', '節電', '売電', 'FIT', 'パワコン']) assert.ok(!html.includes(word), word);
   }
   const html = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: c }));
-  assert.ok(html.includes('現役中の光熱費（月額）')); assert.ok(html.includes('退職後の光熱費（月額）'));
+  assert.ok(html.includes('光熱費')); assert.ok(html.includes('電気・ガス／灯油・水道'));
 });
 test('CSV has aligned purchase and annual rows and no hidden solar columns', () => {
   const c = calcAll(fresh()), csv = csvFor(c), rows = csv.slice(1).split('\r\n').map(line => line.split(','));
@@ -365,8 +367,8 @@ test('area edits reconcile annual ledger, all horizons, housing display and prop
   }
   const housing = renderToStaticMarkup(createElement(HousingPlan, { data: d, calc: after, update: () => {} }));
   const proposal = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: after }));
-  assert.ok(housing.includes(pt.during.toFixed(2))); assert.ok(proposal.includes(pt.during.toFixed(2)));
-  assert.ok(housing.includes(pt.after.toFixed(2))); assert.ok(proposal.includes(pt.after.toFixed(2)));
+  assert.ok(housing.includes(pt.during.toFixed(2))); assert.ok(housing.includes(pt.after.toFixed(2)));
+  assert.ok(proposal.includes(after.totalPropTax.toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 })));
   near(buildOverview(d, after).monthlyItems.find(item => item.label === '固定資産税等の積立').amount, pt.during / 12);
   invariant(after);
 });
@@ -416,7 +418,7 @@ test('life-stage absent periods remain absent, never fabricated zero-cost stages
   let s = buildLifeStageExpenses(d, calcAll(d)); assert.equal(s.working, null); assert.equal(s.retired.years, 60);
   Object.assign(d.basic, { age: 20, retireAge: 80 });
   s = buildLifeStageExpenses(d, calcAll(d)); assert.equal(s.retired, null); assert.equal(s.working.years, 60);
-  const html = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: calcAll(d) }));
+  const html = renderToStaticMarkup(createElement(Summary, { data: d, calc: calcAll(d), onPrint: () => {}, onExport: () => {} }));
   assert.ok(html.includes('対象期間なし')); assert.ok(!html.includes('NaN'));
 });
 
@@ -438,7 +440,7 @@ test('summary and proposal show only base results while retaining negative balan
     const html = renderToStaticMarkup(createElement(component, props));
     for (const removed of ['条件悪化', '比較設定', 'お客様と確認する前提', '前提の確認状況', '前提未確認', '年末残高はプラスです', '資金計画の見直しが必要です'])
       assert.ok(!html.includes(removed), removed);
-    assert.ok(html.includes('現役中・退職後の支出'));
+    assert.ok(html.includes(component === Summary ? '現役中・退職後の支出' : '30年間の支出総額・内訳'));
     assert.ok(html.includes(c.rows[29].balance.toLocaleString('ja-JP', { maximumFractionDigits: 0 })));
     assert.ok(html.includes('class="negative"'));
     assert.equal((html.match(/stroke-dasharray/g) || []).length, 0);
@@ -452,6 +454,100 @@ test('legacy comparison settings and review checkboxes do not affect the new ove
   assert.deepEqual(buildOverview(d, calcAll(d)), before);
   near(calcAll(d).rows[59].balance, c.rows[59].balance);
 });
+test('proposal has five ordered sections, replacing only the four unwanted pages', () => {
+  for (const years of [30, 40, 50, 60]) {
+    const d = fresh(); d.simYears = years;
+    const html = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: calcAll(d) }));
+    const pages = [...html.matchAll(/<section class="proposal-page[^\"]*">([\s\S]*?)<\/section>/g)].map(m => m[1]);
+    assert.equal(pages.length, 5);
+    assert.ok(pages[0].includes('ライフプラン提案書')); assert.ok(pages[0].includes('30・40・50・60年後の見通し'));
+    assert.ok(pages[1].includes(`${years}年間の支出総額・内訳`));
+    assert.ok(pages[2].includes('年次収支 / 1〜20年後'));
+    assert.ok(pages[3].includes('年次収支 / 21〜40年後'));
+    assert.ok(pages[4].includes('年次収支 / 41〜60年後'));
+    for (const removed of ['購入後1年目の月額予算', '現役中・退職後の支出', '試算に採用した前提', '予定支出と計算上の注記']) assert.ok(!html.includes(removed), removed);
+    assert.equal((html.match(/<th>\d+年 \/ \d+歳<\/th>/g) || []).length, 60);
+  }
+});
+
+test('expense totals match the ledger and initial cash without changing data or counting payments twice', () => {
+  for (const years of [30, 40, 50, 60]) {
+    const d = fresh(); d.simYears = years; d.household.inflationRate = 2;
+    d.household.otherLoan = 2; d.household.otherLoanBalance = 100;
+    d.household.ins4 = 0.4; d.household.retIns2 = 0.2;
+    d.savingsInsurances = [{ id: 's', name: 's', monthly: 1, payoutYear: 35, payoutAmount: 450 }];
+    d.suddenExpenses = [
+      { id: 't', name: '家族旅行', amount: 20, cycleYears: 1 },
+      { id: 'c', name: '車の買い替え', amount: 250, cycleYears: 8 },
+      { id: 'o', name: 'その他', amount: 150, cycleYears: 10 },
+    ];
+    const calc = calcAll(d), original = JSON.stringify({ d, calc }), totals = buildExpenseTotals(d, calc), rows = calc.rows.slice(0, years);
+    near(totals.items.reduce((a, item) => a + item.amount, 0), sum(rows, 'totalOut'));
+    near(totals.grandTotal, totals.periodTotal + calc.cashRequired);
+    near(totals.grandTotal, calc.lccGrand);
+    near(calc.initialSavings + sum(rows, 'income') - totals.grandTotal, rows.at(-1).balance);
+    near(totals.items.find(i => i.key === 'insurance').amount, calc.lifeExpSiPaid);
+    near(totals.items.find(i => i.key === 'otherLoan').amount, sum(rows, 'otherLoanPay'));
+    assert.equal(JSON.stringify({ d, calc }), original); assert.ok(totals.items.every(i => i.amount >= 0));
+  }
+});
+
+test('fifty and sixty year totals include only events within the selected period', () => {
+  const d = fresh(); Object.assign(d.household, { car: 0, retCar: 0, ins4: 0, retIns2: 0 });
+  d.suddenExpenses = [
+    { id: 't', name: '家族旅行', amount: 20, cycleYears: 1 },
+    { id: 'c', name: '車の買い替え', amount: 250, cycleYears: 8 },
+    { id: 'o', name: '記念支出', amount: 100, cycleYears: 1, firstYear: 51, once: true },
+  ];
+  const get = (years) => { d.simYears = years; return Object.fromEntries(buildExpenseTotals(d, calcAll(d)).items.map(i => [i.key, i.amount])); };
+  const fifty = get(50), sixty = get(60);
+  near(fifty.travel, 1000); near(sixty.travel, 1200);
+  near(fifty.car, 1500); near(sixty.car, 1750);
+  near(fifty.other, 0); near(sixty.other, 100);
+});
+
+test('car totals extract running costs and insurance at retirement and inflate purchases once', () => {
+  const d = fresh(); Object.assign(d.basic, { age: 64, retireAge: 65 });
+  Object.assign(d.household, { car: 3, ins4: 0.4, retCar: 1, retIns2: 0.2, inflationRate: 2 });
+  d.suddenExpenses = [{ id: 'c', name: 'ミニバン', category: 'car', amount: 300, cycleYears: 1, firstYear: 2, once: true }];
+  const c = calcAll(d), totals = buildExpenseTotals(d, c);
+  near(c.rows[0].carRunningCost, 40.8); near(c.rows[1].carRunningCost, 14.4 * 1.02);
+  near(c.rows[1].plannedCosts.car, 306); near(c.rows[2].plannedCosts.car, 0);
+  const expected = 40.8 + Array.from({ length: 29 }, (_, i) => 14.4 * 1.02 ** (i + 1)).reduce((a, v) => a + v, 0) + 306;
+  near(totals.items.find(i => i.key === 'car').amount, expected);
+  near(totals.items.reduce((a, i) => a + i.amount, 0), totals.periodTotal);
+});
+
+test('planned expense classification migrates older names and preserves explicit overrides', () => {
+  const d = fresh(); d.suddenExpenses = [
+    { id: 't', name: '家族旅行', amount: 20, cycleYears: 1 },
+    { id: 'c', name: '車の買い替え', amount: 250, cycleYears: 8 },
+    { id: 'o', name: '家具', amount: 50, cycleYears: 10 },
+    { id: 'custom', name: '旅行の準備', category: 'other', amount: 10, cycleYears: 1 },
+    { id: 'invalid', name: '旅費', category: 'broken', amount: 10, cycleYears: 1 },
+  ];
+  const restored = normalizeData(d);
+  assert.deepEqual(restored.suddenExpenses.map(e => e.category), ['travel', 'car', 'other', 'other', 'travel']);
+  restored.suddenExpenses[0].name = '帰省'; assert.equal(expenseCategory(restored.suddenExpenses[0]), 'travel');
+  assert.deepEqual(normalizeData(JSON.parse(JSON.stringify(restored))), restored);
+  const before = calcAll(restored);
+  restored.suddenExpenses[0].category = 'other'; const after = calcAll(restored);
+  before.rows.forEach((r, i) => { near(r.totalOut, after.rows[i].totalOut); near(r.balance, after.rows[i].balance); });
+  near(before.rows[0].plannedCosts.travel - after.rows[0].plannedCosts.travel, 20);
+  near(after.rows[0].plannedCosts.other - before.rows[0].plannedCosts.other, 20);
+});
+
+test('zero budgets and unusual retirement boundaries do not create missing totals or NaN', () => {
+  for (const age of [20, 70]) {
+    const d = fresh(); d.basic.age = age; d.basic.retireAge = age === 20 ? 90 : 65;
+    Object.keys(d.household).forEach(key => { if (key !== 'utilityInputVersion') d.household[key] = 0; });
+    const c = calcAll(d), totals = buildExpenseTotals(d, c);
+    for (const key of ['living', 'utility', 'travel', 'car', 'insurance', 'otherLoan', 'other']) near(totals.items.find(i => i.key === key).amount, 0);
+    near(totals.items.reduce((a, i) => a + i.amount, 0), totals.periodTotal);
+    const html = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: c })); assert.ok(!/NaN|undefined|Infinity/.test(html));
+  }
+});
+
 test('deterministic varied scenarios preserve all accounting identities', () => {
   let seed = 19790212;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2 ** 32; };

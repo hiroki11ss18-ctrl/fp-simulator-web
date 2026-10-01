@@ -254,6 +254,7 @@ button { touch-action: manipulation; }
 .decision-band p { font-size: 12px; margin-top: 3px; }
 .decision-band.risk { background: #fff1ee; border-color: #b84e46; color: #78352f; }
 .event-row { display: grid; grid-template-columns: 1.5fr repeat(5, minmax(100px, 1fr)) 36px; align-items: end; gap: 12px; padding: 16px 0; border-top: 1px solid #e1e6e9; }
+.event-row.planned-expense-row { grid-template-columns: minmax(140px, 1.5fr) repeat(6, minmax(90px, 1fr)) 36px; }
 .education-row { padding: 18px 0; border-top: 1px solid #e1e6e9; }
 .maintenance-row { display: grid; grid-template-columns: 62px minmax(180px, 2fr) 1fr 1fr 36px; gap: 15px; align-items: end; padding: 15px 0; border-top: 1px solid #e1e6e9; }
 .check-cell { display: flex; align-items: center; gap: 5px; font-size: 12px; padding-bottom: 11px; }
@@ -281,7 +282,7 @@ input[type=checkbox] { accent-color: #287abe; width: 16px; height: 16px; flex-sh
 .data-toolbar input { width: 1px; height: 1px; opacity: 0; position: absolute; }
 summary { cursor: pointer; font-size: 13px; color: #33647f; padding: 8px 0; }
 @media (max-width: 1050px) {
-  .event-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .event-row,.event-row.planned-expense-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .form-grid.dense { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .maintenance-row { grid-template-columns: 62px 1fr 1fr; }
@@ -290,7 +291,7 @@ summary { cursor: pointer; font-size: 13px; color: #33647f; padding: 8px 0; }
   header.sticky { position: relative; }
   .header-actions { width: 100%; }
   .plan-section { padding: 20px 14px; }
-  .form-grid,.form-grid.dense,.event-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .form-grid,.form-grid.dense,.event-row,.event-row.planned-expense-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .maintenance-row { grid-template-columns: 1fr 1fr; gap: 12px; }
   .metric-grid { gap: 15px; }
   .metric strong { font-size: 24px; }

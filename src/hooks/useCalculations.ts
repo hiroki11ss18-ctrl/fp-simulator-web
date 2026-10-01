@@ -3,7 +3,7 @@ import type { SimData, CalcResult, YearRow, LoanPlan, HouseType } from '../types
 import { DEFAULT_DATA } from '../lib/defaults';
 import { clamp } from '../lib/math';
 import { calcEdu, eduAnnualByAge, childrenOf, childEducation } from '../lib/education';
-import { occursInYear } from '../lib/suddenExpenses';
+import { occursInYear, expenseCategory } from '../lib/suddenExpenses';
 import { loanSchedule } from '../lib/loans';
 import { propertyAssessment } from '../lib/propertyAssessment';
 
@@ -374,8 +374,8 @@ export function calcAll(data: SimData): CalcResult {
   if (h.propTaxBuildingValue === null || h.propTaxLandValue === null)
     warnings.push('固定資産税は出雲市の税率・仮評価額による概算です。評価替え・建物の経年減価は含みません。市外の物件は別途確認してください。');
   if (hh.inflationRate === 0) warnings.push('物価上昇率は0%です。長期の生活費・教育費・修繕費が変わらない仮定になっています。');
-  if (!(data.suddenExpenses ?? []).some(e => /旅行/.test(e.name) && e.amount > 0)) warnings.push('旅行の予定支出が未設定です。希望がある場合は金額を追加してください。');
-  if (!(data.suddenExpenses ?? []).some(e => /車.*(替|購入)/.test(e.name) && e.amount > 0)) warnings.push('車の買い替えが未設定です。月々の車両費と分けて確認してください。');
+  if (!(data.suddenExpenses ?? []).some(e => expenseCategory(e) === 'travel' && e.amount > 0)) warnings.push('旅行の予定支出が未設定です。希望がある場合は金額を追加してください。');
+  if (!(data.suddenExpenses ?? []).some(e => expenseCategory(e) === 'car' && e.amount > 0)) warnings.push('車の買い替えが未設定です。月々の車両費と分けて確認してください。');
   warnings.push('0〜2歳の保育料、大学等の入学金・教材費、介護・災害・相続・児童手当・補助金・運用益・不動産売却額は自動計上しません。必要な支出は予定支出に追加してください。');
 
   for (let y = 0; y < 60; y++) {
@@ -429,6 +429,7 @@ export function calcAll(data: SimData): CalcResult {
       if (si.payoutYear === year) { insurancePayout += si.payoutAmount; events.push((si.name || '貯蓄型保険') + ' 満期'); }
     }
     const living = (isWork ? workLiving : retLiving) * 12 * factor + insurancePremium + otherLoanPay;
+    const carRunningCost = (isWork ? hh.car + hh.ins4 : hh.retCar + hh.retIns2) * 12 * factor;
     const utilityMonthly = isWork || hh.retUtility <= 0 ? hh.electricMonthly + hh.gasMonthly + hh.waterMonthly : hh.retUtility;
     const utility = utilityMonthly * 12 * factor;
     const propTax = y < pt.reductionYears ? pt.during : pt.after;
@@ -440,8 +441,10 @@ export function calcAll(data: SimData): CalcResult {
       }
     }
     let sudden = 0;
+    const plannedCosts = { travel: 0, car: 0, other: 0 };
     for (const e of data.suddenExpenses ?? []) if (occursInYear(e, year)) {
       sudden += e.amount * factor; events.push(e.name || '予定支出');
+      plannedCosts[expenseCategory(e)] += e.amount * factor;
     }
     let taxBack = 0;
     if (l.taxInclude && l.taxMoveInYear === startYear && y < taxDeductionYears && l.years >= 10 && mortgage.deductionEligible) {
@@ -461,7 +464,7 @@ export function calcAll(data: SimData): CalcResult {
     rows.push({
       year, calYear: startYear + year, age: b.age + year, income, wage, pension, retBonus,
       insurancePayout, insurancePremium, loanPay, prepaid: mortgage.prepaid, otherLoanPay, otherLoanBalance: otherBalance,
-      living, utility, propTax, eduCost, maintCost,
+      living, utility, propTax, eduCost, maintCost, carRunningCost, plannedCosts,
       leaveIncomeLoss, sudden, taxBack, net, balance, totalOut, loanBalance: mortgage.balance,
       status: judgeStatus(net, eduCost + maintCost + sudden), events,
     });

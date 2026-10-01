@@ -1,4 +1,12 @@
-import type { SuddenExpense } from '../types';
+import type { ExpenseCategory, SuddenExpense } from '../types';
+
+export function expenseCategory(expense: Pick<SuddenExpense, 'name' | 'category'>): ExpenseCategory {
+  if (expense.category === 'travel' || expense.category === 'car' || expense.category === 'other') return expense.category;
+  // Older saves have names only. Explicit selections always take precedence.
+  if (/旅行|旅費/.test(expense.name)) return 'travel';
+  if (/車.*(?:買|替|購入)/.test(expense.name)) return 'car';
+  return 'other';
+}
 
 export function getSuddenExpenseOccurrenceYears(simYears: number, cycleYears: number): number[] {
   if (simYears <= 0 || cycleYears <= 0) return [];
