@@ -447,6 +447,20 @@ test('summary and proposal show only base results while retaining negative balan
   }
 });
 
+test('summary omits the first-year budget section while retaining the remaining results', () => {
+  for (const years of [30, 40, 50, 60]) {
+    const d = fresh(); d.simYears = years;
+    const c = calcAll(d), original = JSON.stringify(c);
+    const html = renderToStaticMarkup(createElement(Summary, { data: d, calc: c, onPrint: () => {}, onExport: () => {} }));
+    assert.ok(!html.includes('購入後1年目の月額予算'));
+    assert.ok(!html.includes('初年度の給与・賞与・年金を12で割った月平均です。'));
+    assert.ok(!html.includes('budget-table'));
+    for (const retained of ['支払い・積立後の月平均余力', '30・40・50・60年後の見通し', '手元資金の推移', '現役中・退職後の支出', '最後に残るお金の計算', '年ごとの収支・手元資金']) assert.ok(html.includes(retained), retained);
+    assert.ok(html.includes(c.rows[years - 1].balance.toLocaleString('ja-JP', { maximumFractionDigits: 0 })));
+    assert.equal(JSON.stringify(c), original);
+  }
+});
+
 test('legacy comparison settings and review checkboxes do not affect the new overview', () => {
   const d = fresh(), c = calcAll(d), before = buildOverview(d, c);
   Object.assign(d.stress, { rateAdd: 8, incomeDropPct: 99, expenseAddPct: 100 });

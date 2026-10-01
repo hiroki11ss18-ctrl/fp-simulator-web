@@ -3,7 +3,7 @@ import { Download, Printer, FileDown } from 'lucide-react';
 import type { SimData, CalcResult } from '../../types';
 import { fmt } from '../../lib/format';
 import { buildOverview } from '../../lib/planning';
-import { HorizonTable, MonthlyBudget, MoneyBridge, AnnualTable, BalancePlot, LifeStageExpenses } from '../PlanResults';
+import { HorizonTable, MoneyBridge, AnnualTable, BalancePlot, LifeStageExpenses } from '../PlanResults';
 
 export function downloadText(name: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -48,9 +48,6 @@ export default function Summary({ data, calc, onPrint, onExport }: {
     <section className="plan-section"><h2>30・40・50・60年後の見通し</h2><HorizonTable overview={view} /></section>
     <section className="plan-section"><h2>手元資金の推移</h2><BalancePlot calc={calc} />
       <p className="plan-note">年齢は各年の終了時点。1年目から60年目末までを計算し、30年目末などの修繕・買い替えも含みます。年末残高がプラスでも、年内の大きな支払いに備えた別途の資金繰り確認が必要です。</p>
-    </section>
-    <section className="plan-section"><h2>購入後1年目の月額予算</h2><MonthlyBudget overview={view} />
-      <p className="plan-note">初年度の給与・賞与・年金を12で割った月平均です。賞与を受け取らない月の収支とは異なります。退職金・控除・保険満期は除外。修繕・旅行・車等の積立は{data.simYears}年間の予定総額÷{data.simYears}年÷12の目安です。残高の計算では積立を再度差し引かず、実際の発生年に支出します。繰上返済は年次表で別途確認してください。</p>
     </section>
     <section className="plan-section"><h2>現役中・退職後の支出</h2><LifeStageExpenses overview={view} /></section>
     <section className="plan-section"><h2>最後に残るお金の計算</h2><MoneyBridge calc={calc} years={data.simYears} />
