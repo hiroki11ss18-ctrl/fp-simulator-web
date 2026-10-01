@@ -25,7 +25,7 @@ export default function LoanPlan({ data, update, calc }: { data: SimData; update
           <NumInput value={h.actualLoan} onChange={v => update({ housing: { ...h, actualLoan: v } })} suffix="万円" step={10} />
         </Field>
         <Field label="返済期間"><NumInput value={l.years} onChange={v => set({ years: Math.round(v), varPeriod1: Math.min(l.varPeriod1, Math.round(v)), varPeriod2: Math.min(l.varPeriod2, Math.round(v)), fixPeriod1: Math.min(l.fixPeriod1, Math.round(v)), fixPeriod2: Math.min(l.fixPeriod2, Math.round(v)) })} suffix="年" step={1} min={1} max={60} /></Field>
-        <Field label="採用する金利"><Select value={l.loanType} onChange={loanType => set({ loanType })} options={[{ value: 'var', label: '変動金利シナリオ' }, { value: 'fix', label: '固定金利シナリオ' }]} /></Field>
+        <Field label="採用する金利"><Select value={l.loanType} onChange={loanType => set({ loanType })} options={[{ value: 'var', label: '変動金利' }, { value: 'fix', label: '固定金利' }]} /></Field>
       </div>
       <div className="metric-grid mt-5">
         <div className="metric"><span>実借入額</span><strong>{fmt(calc.loan)}<small>万円</small></strong></div>
