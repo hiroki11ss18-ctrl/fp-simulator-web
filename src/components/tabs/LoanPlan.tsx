@@ -15,6 +15,10 @@ export default function LoanPlan({ data, update, calc }: { data: SimData; update
   const first = calc.rows[0];
   const annualPayment = first.loanPay - first.prepaid + first.otherLoanPay;
   const pt = calcPropertyTax(h, l);
+  const taxPair = b.spouseEnabled && b.loanBorrowType === 'pair';
+  const taxIssue = l.taxMoveInYear !== Number(b.date.slice(0, 4)) ? '入居年と基本情報の試算開始年が異なるため、概算は保留しています。'
+    : calc.taxDeductionYears === 0 ? 'この入居年・性能区分は試算の対応外です。2028年以降の省エネ基準適合住宅の経過措置等は個別確認が必要です。'
+      : l.years < 10 ? '返済期間が10年未満のため、本試算では控除対象外です。' : '';
   const number = (key: keyof Loan, label: string, suffix: string, step = 0.1, min = 0, max?: number) =>
     <Field label={label}><NumInput value={l[key] as number} onChange={v => set({ [key]: v })} suffix={suffix} step={step} min={min} max={max} /></Field>;
   return <div className="plan-layout">
@@ -74,20 +78,42 @@ export default function LoanPlan({ data, update, calc }: { data: SimData; update
       <p className="plan-note">残高があれば残高・金利・毎月の返済額で完済まで計算します。残高0の場合は残り月数を使用。いずれも未入力で返済額がある場合は不足を見落とさないよう60年間計上し、確認事項に表示します。</p>
     </section>
     <section className="plan-section">
-      <div className="section-heading"><h2>住宅ローン控除</h2><Toggle checked={l.taxInclude} onChange={taxInclude => set({ taxInclude })} label="確認した上限で資金計画に含める" /></div>
+      <div className="section-heading"><h2>住宅ローン控除の目安</h2><span>参考表示のみ・資金計画への加算なし</span></div>
+      {taxIssue ? <p className="plan-note" role="status">{taxIssue}</p> : <div className="metric-grid mb-4">
+        <div className="metric"><span>1年目の税負担軽減額（概算）</span><strong>約{fmt(calc.taxEstimateRows[0]?.total ?? 0, 1)}<small>万円</small></strong></div>
+        <div className="metric"><span>{calc.taxDeductionYears}年間の合計（概算）</span><strong>約{fmt(calc.taxDeductionTotal, 1)}<small>万円</small></strong></div>
+        {taxPair && <><div className="metric"><span>合計のうち世帯主分</span><strong>約{fmt(calc.taxDeductionMain, 1)}<small>万円</small></strong></div>
+          <div className="metric"><span>合計のうち配偶者分</span><strong>約{fmt(calc.taxDeductionSpouse, 1)}<small>万円</small></strong></div></>}
+      </div>}
+      <p className="plan-note">所得税の還付・減額と翌年の住民税の軽減を合わせた目安です。全額が現金で戻るわけではありません。総合まとめ・提案書の収入や手元資金には含めません。</p>
       <div className="form-grid">
         <Field label="住宅の性能区分"><Select value={l.taxHouseType} onChange={taxHouseType => set({ taxHouseType })} options={[{ value: 'long_term', label: '認定長期優良・低炭素住宅' }, { value: 'zeh', label: 'ZEH水準省エネ住宅' }, { value: 'general', label: '省エネ基準適合住宅' }]} /></Field>
         {number('taxMoveInYear', '入居年', '年', 1, 2026, 2030)}
         {number('taxLoanAmount', '控除対象の借入額（0は実借入）', '万円', 10)}
-        {b.spouseEnabled && b.loanBorrowType === 'pair' && number('taxPairMainShare', '世帯主の借入割合', '%', 1, 0, 100)}
+        {taxPair && number('taxPairMainShare', '世帯主の借入割合', '%', 1, 0, 100)}
       </div>
       <div className="mt-4"><Toggle checked={l.taxSpecialHousehold} onChange={taxSpecialHousehold => set({ taxSpecialHousehold })} label="子育て・若者夫婦世帯の上乗せ対象（要件確認済み）" /></div>
-      {l.taxInclude && <div className="form-grid mt-4">
-        {number('taxAnnualCap', '世帯主が控除できる年間税額上限', '万円/年', 0.1)}
-        {b.spouseEnabled && b.loanBorrowType === 'pair' && number('taxSpouseAnnualCap', '配偶者が控除できる年間税額上限', '万円/年', 0.1)}
-      </div>}
-      <p className="plan-note">資金計画への計上額 {fmt(calc.taxDeductionTotal, 1)}万円。各人の年末残高に対する制度上限と、入力した所得税・住民税から実際に控除できる額の小さい方を使用。収入低下時は上限を比例縮小し、給与収入0の年は0とする保守的な概算です。制度上の借入限度額は1人{fmt(calc.taxBorrowLimit)}万円・最長{calc.taxDeductionYears}年。すべての適用要件や税額を判定するものではありません。</p>
-      <p className="plan-note"><a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1211-1.htm" target="_blank" rel="noreferrer">国税庁：住宅借入金等特別控除</a>（2026年4月1日現在の制度）。2028年以降の省エネ基準適合住宅の経過措置等は別途確認。本試算の対応外は0円です。未確認の控除を、毎月の返済原資に含めないでください。</p>
+      <div className="form-grid mt-4">
+        <Field label="税額の見積方法"><Select value={l.taxEstimateMode} onChange={taxEstimateMode => set({ taxEstimateMode })} options={[{ value: 'income', label: '給与年収から概算' }, { value: 'manual', label: '確認済みの年間上限を入力' }]} /></Field>
+        {l.taxEstimateMode === 'income' ? <>
+          {number('taxSocialInsurancePct', '社会保険料の仮定（給与年収に対する割合）', '%', 0.5, 0, 100)}
+          {number('taxOtherDeductionMain', '世帯主の追加所得控除（扶養・保険等）', '万円/年', 1)}
+          {taxPair && number('taxOtherDeductionSpouse', '配偶者の追加所得控除（扶養・保険等）', '万円/年', 1)}
+        </> : <>
+          {number('taxAnnualCap', '世帯主の控除可能額（所得税＋住民税）', '万円/年', 0.1)}
+          {taxPair && number('taxSpouseAnnualCap', '配偶者の控除可能額（所得税＋住民税）', '万円/年', 0.1)}
+        </>}
+      </div>
+      <p className="plan-note">{l.taxEstimateMode === 'income'
+        ? '給与・賞与の推移、昇給・退職・配偶者の休業を反映。給与所得控除・基礎控除と上記の社会保険料・追加所得控除から税額を概算します。扶養・配偶者・生命保険・iDeCo等の控除は自動判定しません。追加所得控除が0なら未反映です。年金・事業所得・退職所得、他の税額控除、住民税の個別調整、付加税、年末調整表の細かな端数は未反映です。'
+        : '入力額は毎年同額で見込みます。退職・休業などによる税額変化は自動反映しません。住民税の控除上限を含め、実際に住宅ローン控除を使える額を税務署・税理士等で確認した場合の概算です。0は控除なしとして扱います。'}</p>
+      {!taxIssue && <details className="mt-4"><summary>年ごとの控除目安</summary>
+        <div className="table-scroll"><table className="plan-table"><thead><tr><th>入居から</th><th>借入残高等による上限</th><th>世帯主の目安</th>{taxPair && <th>配偶者の目安</th>}<th>合計の目安</th></tr></thead>
+          <tbody>{calc.taxEstimateRows.map(row => <tr key={row.year}><th>{row.year}年目</th><td>{fmt(row.loanLimit, 2)}万円</td><td>{fmt(row.main, 2)}万円</td>{taxPair && <td>{fmt(row.spouse, 2)}万円</td>}<td>{fmt(row.total, 2)}万円</td></tr>)}</tbody>
+        </table></div>
+      </details>}
+      <p className="plan-note">新築住宅・各年12回返済後の残高で概算。1人あたりの借入限度額は{fmt(calc.taxBorrowLimit)}万円、控除率0.7%。借入割合は持分と一致する仮定です。補助金等を差し引いた取得対価・借入使途・床面積・所得・居住等の適用要件は別途確認が必要です。制度改正や初年度の返済月数によって実額は変わります。</p>
+      <p className="plan-note">制度確認：<a href="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1211-1.htm" target="_blank" rel="noreferrer">国税庁・住宅ローン控除</a> / <a href="https://www.nta.go.jp/publication/pamph/gensen/2026kaisei.pdf" target="_blank" rel="noreferrer">2026年改正の所得控除</a> / <a href="https://www.city.kyoto.lg.jp/gyozai/page/0000027932.html" target="_blank" rel="noreferrer">住民税の控除上限</a>（2026年10月2日確認）。2028年以降の税額は確認時点の制度が続く仮定です。</p>
     </section>
     <section className="plan-section">
       <h2>固定資産税・都市計画税</h2>

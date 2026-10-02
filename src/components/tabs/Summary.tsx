@@ -13,7 +13,7 @@ export function downloadText(name: string, text: string, type: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function csvFor(calc: CalcResult) {
-  const header = ['経過年', '年末年齢', '給与手取り', '年金手取り', '退職金', '保険受取', '住宅ローン控除', '住宅ローン返済', '生活費・他ローン・保険', '光熱費（電気・ガス・水道）', '固定資産税等', '教育費', '修繕費', '予定支出', '年間収支', '年末手元資金', '住宅ローン残高', '他ローン残高', '出来事'];
+  const header = ['経過年', '年末年齢', '給与手取り', '年金手取り', '退職金', '保険受取', '住宅ローン控除（計上なし）', '住宅ローン返済', '生活費・他ローン・保険', '光熱費（電気・ガス・水道）', '固定資産税等', '教育費', '修繕費', '予定支出', '年間収支', '年末手元資金', '住宅ローン残高', '他ローン残高', '出来事'];
   const cell = (v: string | number) => typeof v === 'number' ? v.toFixed(2) : '"' + (/^[=+\-@\t\r]/.test(v) ? "'" : '') + v.replace(/"/g, '""') + '"';
   return '\uFEFF' + [header, [0, '', '', '', '', '', '', '', '', '', '', '', '', '', '', calc.initialCash, calc.loan, '', '購入直後・金額は万円'],
     ...calc.rows.map(r => [r.year, r.age, r.wage, r.pension, r.retBonus, r.insurancePayout, r.taxBack, r.loanPay, r.living, r.utility, r.propTax, r.eduCost, r.maintCost, r.sudden, r.net, r.balance, r.loanBalance, r.otherLoanBalance, r.events.join(' / ')])].map(row => row.map(cell).join(',')).join('\r\n');
@@ -25,7 +25,7 @@ export default function Summary({ data, calc, onPrint, onExport }: {
   const view = useMemo(() => buildOverview(data, calc), [data, calc]);
   const periodRows = calc.rows.slice(0, data.simYears);
   const incomeItems = [['給与（手取り）', calc.lifeIncWage], ['年金（手取り）', calc.lifeIncPension], ['退職金', calc.lifeIncRetBonus],
-    ['保険満期受取', calc.lifeIncSiPayout], ['住宅ローン控除', calc.lifeIncTaxBack]] as const;
+    ['保険満期受取', calc.lifeIncSiPayout]] as const;
   const expenseItems = [['住宅ローン・繰上返済', calc.lifeExpLoanPay], ['生活費・他ローン・掛捨保険', calc.lifeExpLiving],
     ['積立保険料', calc.lifeExpSiPaid], ['光熱費（電気・ガス・水道）', calc.lifeExpUtility], ['固定資産税等', calc.lifeExpPropTax],
     ['教育・仕送り', calc.lifeExpEdu], ['修繕・設備更新', calc.lifeExpMaint], ['旅行・車等の予定支出', calc.lifeExpSudden]] as const;
@@ -58,7 +58,7 @@ export default function Summary({ data, calc, onPrint, onExport }: {
     <details className="plan-section"><summary>計算上の注記</summary><ul className="assumptions-list">{calc.warnings.map(w => <li key={w}>{w}</li>)}</ul></details>
     <section className="plan-section">
       <div className="section-heading"><h2>年ごとの収支・手元資金</h2><button className="action-button" onClick={() => downloadText('FP年次収支_' + data.basic.date + '.csv', csvFor(calc), 'text/csv;charset=utf-8')}><Download size={16} />60年分の明細</button></div>
-      <p className="plan-note">単位：万円。収入には退職金・控除・保険受取を含みます。生活費には他ローン・保険料、住宅ローンには繰上返済を含みます。</p>
+      <p className="plan-note">単位：万円。収入には退職金・保険受取を含み、住宅ローン控除は含みません。生活費には他ローン・保険料、住宅ローンには繰上返済を含みます。</p>
       <AnnualTable rows={periodRows} detailed />
     </section>
   </div>;

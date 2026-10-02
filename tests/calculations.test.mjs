@@ -19,6 +19,8 @@ const { default: HousingPlan } = await server.ssrLoadModule('/src/components/tab
 const { default: Summary, csvFor } = await server.ssrLoadModule('/src/components/tabs/Summary.tsx');
 const { default: Lcc } = await server.ssrLoadModule('/src/components/tabs/Lcc.tsx');
 const { default: Maintenance } = await server.ssrLoadModule('/src/components/tabs/Maintenance.tsx');
+const { default: LoanPlan } = await server.ssrLoadModule('/src/components/tabs/LoanPlan.tsx');
+const { salaryIncome, basicTaxDeduction, estimatedTaxCapacity, estimatePersonalRelief } = await server.ssrLoadModule('/src/lib/mortgageTax.ts');
 const { TABS } = await server.ssrLoadModule('/src/components/Header.tsx');
 const { PROPOSAL_STYLES } = await server.ssrLoadModule('/src/lib/proposalStyles.ts');
 const fresh = () => { const d = structuredClone(DEFAULT_DATA); d.basic.date = '2026-09-22'; return d; };
@@ -73,8 +75,9 @@ test('shortening below ten years stops credits from that year, not earlier years
     years: 15, varRate1: 0, varRate2: 0, varRate3: 0, pyear: 5, pamount: 1800 });
   d.housing.actualLoan = 3000;
   const c = calcAll(d); assert.equal(c.repaymentYears, 6);
-  assert.ok(c.rows[0].taxBack > 0 && c.rows[3].taxBack > 0);
-  near(c.rows[4].taxBack, 0); near(c.rows[5].taxBack, 0);
+  assert.ok(c.taxEstimateRows[0].total > 0 && c.taxEstimateRows[3].total > 0);
+  near(c.taxEstimateRows[4].total, 0); near(c.taxEstimateRows[5].total, 0);
+  assert.ok(c.rows.every(r => r.taxBack === 0));
 });
 function invariant(c) {
   assert.equal(c.rows.length, 60);
@@ -222,16 +225,98 @@ test('insurance premium and maturity use the same year-end convention', () => {
   const d = fresh(); d.savingsInsurances = [{ id: 's', name: 's', monthly: 1, payoutYear: 30, payoutAmount: 400 }];
   const c = calcAll(d); near(c.lifeExpSiPaid, 360); near(c.rows[29].insurancePayout, 400); near(c.rows[30].insurancePremium, 0);
 });
-test('tax credits are excluded by default and zero for zero wage', () => {
-  const d = fresh(); near(calcAll(d).taxDeductionTotal, 0);
+test('tax credits have a reference estimate but no income and are zero for zero wage', () => {
+  const d = fresh(); assert.ok(calcAll(d).taxDeductionTotal > 0); near(calcAll(d).lifeIncTaxBack, 0);
   Object.assign(d.loan, { taxInclude: true, taxAnnualCap: 30, taxSpouseAnnualCap: 30 });
   Object.assign(d.basic, { income: 0, spouseIncome: 0, annualBonusInc: 0, spouseAnnualBonusInc: 0 });
   near(calcAll(d).taxDeductionTotal, 0);
 });
-test('tax credit respects personal caps and debt share including zero percent', () => {
-  const d = fresh(); Object.assign(d.loan, { taxInclude: true, taxAnnualCap: 2, taxSpouseAnnualCap: 1, taxPairMainShare: 0 });
-  const c = calcAll(d); near(c.taxDeductionMain, 0); assert.ok(c.rows.every(r => r.taxBack <= 1));
+test('tax reference respects personal caps and debt share including zero percent', () => {
+  const d = fresh(); Object.assign(d.loan, { taxEstimateMode: 'manual', taxInclude: true, taxAnnualCap: 2, taxSpouseAnnualCap: 1, taxPairMainShare: 0 });
+  const c = calcAll(d); near(c.taxDeductionMain, 0); assert.ok(c.taxEstimateRows.every(r => r.total <= 1));
   assert.ok(c.taxDeductionSpouse > 0);
+});
+
+test('tax reference settings including legacy inclusion never change cash flow, summary or proposal', () => {
+  for (const years of [30, 40, 50, 60]) {
+    const d = fresh(); d.simYears = years; const before = calcAll(d);
+    const summary = renderToStaticMarkup(createElement(Summary, { data: d, calc: before, onPrint: () => {} }));
+    const proposal = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: before }));
+    Object.assign(d.loan, { taxInclude: true, taxEstimateMode: 'manual', taxAnnualCap: 100, taxSpouseAnnualCap: 100,
+      taxPairMainShare: 100, taxLoanAmount: 2000, taxOtherDeductionMain: 38 });
+    const after = calcAll(d);
+    assert.notEqual(after.taxDeductionTotal, before.taxDeductionTotal);
+    assert.deepEqual(after.rows, before.rows); near(after.lifeIncTaxBack, 0);
+    assert.deepEqual(buildOverview(d, after), buildOverview(d, before));
+    assert.deepEqual(buildExpenseTotals(d, after), buildExpenseTotals(d, before));
+    assert.equal(csvFor(after), csvFor(before));
+    assert.equal(renderToStaticMarkup(createElement(Summary, { data: d, calc: after, onPrint: () => {} })), summary);
+    assert.equal(renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: after })), proposal);
+  }
+});
+
+test('2026 and 2028 salary and basic deductions follow the published quick formulas', () => {
+  near(salaryIncome(200, 2026), 126); near(salaryIncome(200, 2028), 131);
+  near(salaryIncome(220, 2026), 146); near(salaryIncome(360, 2026), 244);
+  near(salaryIncome(500, 2026), 356); near(salaryIncome(850, 2026), 655);
+  near(salaryIncome(1000, 2026), 805);
+  near(basicTaxDeduction(489, 2026), 104); near(basicTaxDeduction(489.1, 2026), 67);
+  near(basicTaxDeduction(655, 2027), 67); near(basicTaxDeduction(655.1, 2027), 62);
+  near(basicTaxDeduction(132, 2028), 99); near(basicTaxDeduction(132.1, 2028), 62);
+});
+
+test('automatic deduction is capped by income tax and resident credit, not merely 0.7 percent', () => {
+  const cap = estimatedTaxCapacity(500, 2026, 15, 0);
+  near(cap.taxable, 177); near(cap.incomeTax, 8.85); near(cap.residentLimit, 8.85);
+  near(estimatePersonalRelief(35, 500, 2026, 15, 0, null), 17.7);
+  near(estimatePersonalRelief(35, 500, 2026, 15, 38, null), 13.9);
+  near(estimatePersonalRelief(10, 500, 2026, 15, 0, null), 10);
+  near(estimatePersonalRelief(35, 150, 2026, 15, 0, null), 0);
+  near(estimatePersonalRelief(35, 2200, 2026, 15, 0, null), 0);
+  near(estimatedTaxCapacity(1000, 2026, 15, 0).residentLimit, 9.75);
+});
+
+test('manual zero is explicit and old included caps survive normalization as reference only', () => {
+  const d = fresh(); d.loan.taxEstimateMode = 'manual'; near(calcAll(d).taxDeductionTotal, 0);
+  delete d.loan.taxEstimateMode; d.loan.taxInclude = true; d.loan.taxAnnualCap = 2;
+  const restored = normalizeData(d); assert.equal(restored.loan.taxEstimateMode, 'manual');
+  near(restored.loan.taxAnnualCap, 2); near(restored.loan.taxSpouseAnnualCap, 0);
+  assert.ok(calcAll(restored).taxDeductionTotal > 0); near(calcAll(restored).lifeIncTaxBack, 0);
+  assert.deepEqual(normalizeData(JSON.parse(JSON.stringify(restored))), restored);
+});
+
+test('automatic tax reference follows gross wages, retirement, leave and debt ownership', () => {
+  const d = fresh(); Object.assign(d.basic, { income: 500, spouseIncome: 500, retireAge: d.basic.age + 1 });
+  const c = calcAll(d); assert.ok(c.taxEstimateRows[0].main > 0); near(c.taxEstimateRows[1].main, 0);
+  Object.assign(d.basic, { spouseLeaveEnabled: true, spouseLeaveStartYear: 0, spouseLeaveMonths: 12, spouseReturnIncomeRate: 100 });
+  const leave = calcAll(d); near(leave.taxEstimateRows[0].spouse, 0); assert.ok(leave.taxEstimateRows[1].spouse > 0);
+  d.loan.taxPairMainShare = 100; near(calcAll(d).taxDeductionSpouse, 0);
+  d.basic.loanBorrowType = 'single'; d.loan.taxPairMainShare = 0;
+  near(calcAll(d).taxDeductionSpouse, 0); assert.ok(calcAll(d).taxDeductionMain > 0);
+});
+
+test('tax reference cannot grant credits outside supported rules or after repayment', () => {
+  const d = fresh(); d.loan.years = 9; near(calcAll(d).taxDeductionTotal, 0);
+  d.loan.years = 10;
+  assert.ok(calcAll(d).taxEstimateRows.slice(9).every(r => r.total === 0));
+  d.loan.taxMoveInYear = 2028; near(calcAll(d).taxDeductionTotal, 0);
+  const html = renderToStaticMarkup(createElement(LoanPlan, { data: d, calc: calcAll(d), update: () => {} }));
+  assert.ok(html.includes('概算は保留')); assert.ok(!html.includes('確認した上限で資金計画に含める'));
+  d.basic.date = '2028-01-01'; d.loan.taxHouseType = 'general';
+  assert.equal(calcAll(d).taxEstimateRows.length, 0);
+});
+
+test('maintenance comparison includes endpoint years and inflation at all three horizons', () => {
+  for (const years of [40, 50, 60]) {
+    const d = fresh(); d.simYears = years; d.household.inflationRate = 2;
+    d.maint.items = [{ id: 'decade', name: '10年修繕', cycleYears: 10, cost: 100, enabled: true }];
+    const c = calcAll(d), html = renderToStaticMarkup(createElement(Maintenance, { data: d, calc: c, update: () => {} }));
+    const expected = n => Array.from({ length: n / 10 }, (_, i) => 100 * 1.02 ** ((i + 1) * 10 - 1)).reduce((a, v) => a + v, 0);
+    near(sum(c.rows.slice(0, 30), 'maintCost'), expected(30)); near(c.totalMaint, expected(years));
+    assert.ok(html.includes('30年間の修繕・設備更新 累計')); assert.ok(html.includes(`${years}年間の修繕・設備更新 累計`));
+    assert.ok(html.includes(`${years}年後`)); assert.ok(!html.includes(`${years + 10}年後`));
+    for (const y of [40, 50, 60]) assert.ok(html.includes(`value="${y}"`));
+  }
 });
 test('2028 long-term house borrowing limit uses the current supported rule', () => {
   near(getTaxBorrowLimit('long_term', 2028, true), 5000); near(getTaxBorrowLimit('long_term', 2028, false), 4500);

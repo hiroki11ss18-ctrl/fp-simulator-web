@@ -106,9 +106,13 @@ export interface LoanPlan {
   taxSpecialHousehold: boolean; // 子育て・若者夫婦世帯の上乗せ対象か
   // 長期優良住宅フラグ
   isLongTermHouse: boolean;
-  taxInclude: boolean;
+  taxInclude: boolean; // Legacy saved setting; never applied to household cash flow.
   taxAnnualCap: number;
   taxSpouseAnnualCap: number;
+  taxEstimateMode: 'income' | 'manual';
+  taxSocialInsurancePct: number;
+  taxOtherDeductionMain: number;
+  taxOtherDeductionSpouse: number;
 }
 
 // ─── メンテナンス ───
@@ -201,7 +205,7 @@ export interface YearRow {
   sudden: number;     // 急な出費（年間合計）
   plannedCosts: Record<ExpenseCategory, number>; // suddenの内訳（再加算しない）
   carRunningCost: number; // livingに含む車の維持費・自動車保険
-  taxBack: number;    // 住宅ローン控除（年額）
+  taxBack: number;    // Compatibility column: always zero; estimates are separate.
   retBonus: number;   // 退職金
   net: number;        // 年収支
   balance: number;    // 資産残高
@@ -216,6 +220,14 @@ export interface YearRow {
   otherLoanBalance: number;
   prepaid: number;
   totalOut: number;
+}
+
+export interface TaxEstimateRow {
+  year: number;
+  loanLimit: number;
+  main: number;
+  spouse: number;
+  total: number;
 }
 
 export interface CalcResult {
@@ -238,9 +250,10 @@ export interface CalcResult {
   actualTotalInt: number;
   taxBorrowLimit: number;
   taxDeductionYears: number;
-  taxDeductionTotal: number;
+  taxDeductionTotal: number; // Reference estimate, not household income.
   taxDeductionMain: number;
   taxDeductionSpouse: number;
+  taxEstimateRows: TaxEstimateRow[]; // Reference only; excluded from every cash-flow row.
   // LCC集計
   totalUtility: number;
   totalPropTax: number;
@@ -255,7 +268,7 @@ export interface CalcResult {
   lifeIncWage: number;       // 給与収入（現役期）
   lifeIncPension: number;    // 年金収入（退職後）
   lifeIncRetBonus: number;   // 退職金
-  lifeIncTaxBack: number;    // 住宅ローン控除
+  lifeIncTaxBack: number;    // Compatibility total: always zero.
   lifeIncSiPayout: number;   // 貯蓄型保険 満期受取
   lifeLeaveIncomeLoss: number; // 産休・育休による収入減
   lifeExpLoanPay: number;    // ローン返済合計

@@ -60,6 +60,8 @@ export const DEFAULT_DATA: SimData = {
     taxHouseType: 'long_term', taxMoveInYear: 2026, taxLoanAmount: 0, taxPairMainShare: 50, taxSpecialHousehold: true,
     isLongTermHouse: true,
     taxInclude: false, taxAnnualCap: 0, taxSpouseAnnualCap: 0,
+    taxEstimateMode: 'income', taxSocialInsurancePct: 15,
+    taxOtherDeductionMain: 0, taxOtherDeductionSpouse: 0,
   },
   maint: { items: DEFAULT_MAINT_ITEMS },
   household: {

@@ -1,11 +1,12 @@
 import { useMemo } from 'react';
-import type { SimData, CalcResult, YearRow, LoanPlan, HouseType } from '../types';
+import type { SimData, CalcResult, YearRow, LoanPlan, HouseType, TaxEstimateRow } from '../types';
 import { DEFAULT_DATA } from '../lib/defaults';
 import { clamp } from '../lib/math';
 import { calcEdu, eduAnnualByAge, childrenOf, childEducation } from '../lib/education';
 import { occursInYear, expenseCategory } from '../lib/suddenExpenses';
 import { loanSchedule } from '../lib/loans';
 import { propertyAssessment } from '../lib/propertyAssessment';
+import { estimatePersonalRelief } from '../lib/mortgageTax';
 
 // ─── 月返済額（元利均等）───
 export function calcMonthly(principal: number, rate: number, years: number): number {
@@ -342,8 +343,7 @@ export function calcAll(data: SimData): CalcResult {
   const taxPair = b.loanBorrowType === 'pair' && b.spouseEnabled;
   const share = taxPair ? clamp(l.taxPairMainShare, 0, 100) / 100 : 1;
   const eligibleLoanFraction = loanMan > 0 && l.taxLoanAmount > 0 ? Math.min(1, l.taxLoanAmount / loanMan) : 1;
-  const taxBaseMain = ((b.salaryAuto ? b.income : lookupManualSalary(b.salaryManual, b.age)) + b.annualBonusInc) * (b.takeHomePct ?? 80) / 100;
-  const taxBaseSpouse = ((b.salSpouseAuto ? b.spouseIncome : lookupManualSalary(b.spouseSalaryManual, b.spouseAge)) + b.spouseAnnualBonusInc) * (b.spouseTakeHomePct ?? 80) / 100;
+  const taxEstimateRows: TaxEstimateRow[] = [];
   let taxDeductionMain = 0, taxDeductionSpouse = 0;
   let otherBalance = Math.max(0, hh.otherLoanBalance);
   let balance = initialCash;
@@ -366,11 +366,7 @@ export function calcAll(data: SimData): CalcResult {
   if (b.spouseEnabled && b.spouseLeaveEnabled) warnings.push('産休・育休給付は概算率による計算です。給付上限・受給資格・追加給付は未反映のため、勤務先の見込額を確認してください。');
   if (b.loanBorrowType === 'pair' && b.spouseEnabled) warnings.push('ペアローンは共通の金利・返済期間で合算試算します。契約が異なる場合は個別の返済予定表との照合が必要です。');
   if (b.retireAge > b.pensionStartAge || (b.spouseEnabled && b.spouseRetireAge > b.pensionStartAge)) warnings.push('在職中の年金減額は自動計算しません。年金の手取り見込額で確認してください。');
-  if (l.taxInclude) warnings.push('住宅ローン控除は確認した年間上限の範囲で概算計上します。所得・居住・床面積・持分・繰上返済などの適用条件と実際の税額は別途確認が必要です。');
-  else warnings.push('住宅ローン控除は未確認のため手元資金に加えていません。');
-  if (l.taxMoveInYear !== startYear) warnings.push('試算開始年と入居年が一致していません。控除は資金計画へ計上していません。');
-  if (l.taxMoveInYear < 2026 || l.taxMoveInYear > 2030) warnings.push('入力した入居年は控除の対応範囲（2026〜2030年）外です。');
-  if (l.taxHouseType === 'general' && l.taxMoveInYear >= 2028) warnings.push('2028年以降の省エネ基準適合住宅の経過措置は個別確認が必要です。控除は計上していません。');
+  warnings.push('住宅ローン控除は参考表示のみです。収入・手元資金には加えていません。');
   if (h.propTaxBuildingValue === null || h.propTaxLandValue === null)
     warnings.push('固定資産税は出雲市の税率・仮評価額による概算です。評価替え・建物の経年減価は含みません。市外の物件は別途確認してください。');
   if (hh.inflationRate === 0) warnings.push('物価上昇率は0%です。長期の生活費・教育費・修繕費が変わらない仮定になっています。');
@@ -386,9 +382,11 @@ export function calcAll(data: SimData): CalcResult {
     const events: string[] = [];
     const factor = (1 + clamp(hh.inflationRate, 0, 20) / 100) ** y;
     let wage = 0, pension = 0, mainWage = 0, spouseWage = 0, leaveIncomeLoss = 0;
+    let mainGross = 0, spouseGross = 0;
     if (isWork) {
       const gross = b.salaryAuto ? projectSalary(b.income, b.age, ageStart, b.incomeGrowth) : lookupManualSalary(b.salaryManual, ageStart);
-      mainWage = (gross + b.annualBonusInc) * clamp(b.takeHomePct ?? 80, 0, 100) / 100;
+      mainGross = gross + b.annualBonusInc;
+      mainWage = mainGross * clamp(b.takeHomePct ?? 80, 0, 100) / 100;
       wage += mainWage;
     }
     if (ageStart >= b.pensionStartAge) pension += pensionM * 12;
@@ -396,6 +394,9 @@ export function calcAll(data: SimData): CalcResult {
       if (spouseAgeStart < b.spouseRetireAge) {
         const gross = b.salSpouseAuto ? projectSalary(b.spouseIncome, b.spouseAge, spouseAgeStart, b.spouseGrowth) : lookupManualSalary(b.spouseSalaryManual, spouseAgeStart);
         const leave = calcSpouseLeaveYear(b, y, gross, b.spouseAnnualBonusInc);
+        const paidMonths = 12 - leave.leaveMonths - leave.returnedMonths
+          + leave.returnedMonths * clamp(b.spouseReturnIncomeRate, 0, 100) / 100;
+        spouseGross = (gross + b.spouseAnnualBonusInc) * paidMonths / 12;
         spouseWage = leave.income;
         wage += spouseWage;
         leaveIncomeLoss = leave.loss;
@@ -446,18 +447,21 @@ export function calcAll(data: SimData): CalcResult {
       sudden += e.amount * factor; events.push(e.name || '予定支出');
       plannedCosts[expenseCategory(e)] += e.amount * factor;
     }
-    let taxBack = 0;
-    if (l.taxInclude && l.taxMoveInYear === startYear && y < taxDeductionYears && l.years >= 10 && mortgage.deductionEligible) {
-      const eligibleBalance = mortgage.balance * eligibleLoanFraction;
-      const capMain = l.taxAnnualCap * Math.min(1, mainWage / Math.max(0.01, taxBaseMain));
-      const capSpouse = l.taxSpouseAnnualCap * Math.min(1, spouseWage / Math.max(0.01, taxBaseSpouse));
-      const main = Math.max(0, Math.min(eligibleBalance * share, taxBorrowLimit) * 0.007);
-      const spouse = taxPair ? Math.max(0, Math.min(eligibleBalance * (1 - share), taxBorrowLimit) * 0.007) : 0;
-      const mainBack = Math.min(main, capMain), spouseBack = Math.min(spouse, capSpouse);
-      taxBack = mainBack + spouseBack;
-      taxDeductionMain += mainBack; taxDeductionSpouse += spouseBack;
+    if (y < taxDeductionYears) {
+      const eligible = l.taxMoveInYear === startYear && l.years >= 10 && mortgage.deductionEligible;
+      const eligibleBalance = eligible ? mortgage.balance * eligibleLoanFraction : 0;
+      const limit = (fraction: number) => Math.floor(Math.min(eligibleBalance * fraction, taxBorrowLimit) * 0.007 * 100 + 1e-8) / 100;
+      const mainLimit = limit(share), spouseLimit = taxPair ? limit(1 - share) : 0;
+      const manual = l.taxEstimateMode === 'manual';
+      const main = estimatePersonalRelief(mainLimit, mainGross, startYear + y, l.taxSocialInsurancePct,
+        l.taxOtherDeductionMain, manual ? l.taxAnnualCap : null);
+      const spouse = estimatePersonalRelief(spouseLimit, spouseGross, startYear + y, l.taxSocialInsurancePct,
+        l.taxOtherDeductionSpouse, manual ? l.taxSpouseAnnualCap : null);
+      taxDeductionMain += main; taxDeductionSpouse += spouse;
+      taxEstimateRows.push({ year, loanLimit: mainLimit + spouseLimit, main, spouse, total: main + spouse });
     }
-    const income = wage + pension + retBonus + insurancePayout + taxBack;
+    const taxBack = 0;
+    const income = wage + pension + retBonus + insurancePayout;
     const totalOut = loanPay + living + utility + propTax + eduCost + maintCost + sudden;
     const net = income - totalOut;
     balance += net;
@@ -476,7 +480,7 @@ export function calcAll(data: SimData): CalcResult {
     loan: loanMan, loanAuto, miscAmt, totalCost, monthly,
     monthlyPhase1: lc.phaseMonthly[0], monthlyPhase2: lc.phaseMonthly[1], monthlyPhase3: lc.phaseMonthly[2],
     repaymentYears, completionAge: b.age + repaymentYears, actualTotalRepay: lc.totalPaid, actualTotalInt: lc.totalInterest,
-    taxBorrowLimit, taxDeductionYears, taxDeductionTotal: taxDeductionMain + taxDeductionSpouse, taxDeductionMain, taxDeductionSpouse,
+    taxBorrowLimit, taxDeductionYears, taxDeductionTotal: taxDeductionMain + taxDeductionSpouse, taxDeductionMain, taxDeductionSpouse, taxEstimateRows,
     totalUtility: sum('utility'), totalPropTax: sum('propTax'), totalEdu: sum('eduCost'), totalMaint: sum('maintCost'),
     totalLiving: sum('living'),
     lccGrand: cashRequired + sum('totalOut'),

@@ -44,7 +44,7 @@ const PrintProposal = forwardRef<HTMLDivElement, { data: SimData; calc: CalcResu
     {chunks.map((rows, i) => <section className="proposal-page" key={i}>
       <header className="proposal-header"><h2>年次収支 / {rows[0].year}〜{rows[rows.length - 1].year}年後</h2><span>単位：万円</span></header>
       <AnnualTable rows={rows} />
-      <p className="plan-note">収入＝給与・年金・退職金・控除・保険満期受取。住宅ローンには繰上返済を含みます。その他支出＝生活費・他ローン・保険料・光熱費・教育費・税・修繕・予定支出。年齢は各年終了時点。</p>
+      <p className="plan-note">収入＝給与・年金・退職金・保険満期受取（住宅ローン控除は含みません）。住宅ローンには繰上返済を含みます。その他支出＝生活費・他ローン・保険料・光熱費・教育費・税・修繕・予定支出。年齢は各年終了時点。</p>
       <footer className="proposal-footer">{b.customerName || 'お客様'} 様 / {b.date} / 入力条件に基づく年末残高の試算</footer>
     </section>)}
   </div>;

@@ -38,6 +38,8 @@ export function normalizeData(raw: unknown): SimData {
     }
   }
   const old = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const oldLoan = old.loan && typeof old.loan === 'object' ? old.loan as Record<string, unknown> : {};
+  if (oldLoan.taxEstimateMode === undefined && oldLoan.taxInclude === true) d.loan.taxEstimateMode = 'manual';
   const oldHousehold = old.household && typeof old.household === 'object' ? old.household as Record<string, unknown> : {};
   if (oldHousehold.utilityInputVersion !== 1 && old.solar && typeof old.solar === 'object') {
     const s = old.solar as Record<string, unknown>;
@@ -72,6 +74,7 @@ export function normalizeData(raw: unknown): SimData {
   if (!['var', 'fix'].includes(d.loan.loanType)) d.loan.loanType = 'var';
   if (!['期間短縮', '返済額軽減'].includes(d.loan.ptype)) d.loan.ptype = '期間短縮';
   if (!['long_term', 'zeh', 'general'].includes(d.loan.taxHouseType)) d.loan.taxHouseType = 'long_term';
+  if (!['income', 'manual'].includes(d.loan.taxEstimateMode)) d.loan.taxEstimateMode = 'income';
   d.basic.kids = Math.min(3, Math.floor(d.basic.kids));
   return d;
 }

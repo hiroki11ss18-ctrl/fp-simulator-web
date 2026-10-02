@@ -1,23 +1,27 @@
+import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { Field, NumInput, TextInput } from '../ui';
+import { Field, NumInput, Select, TextInput } from '../ui';
 import type { SimData, MaintItem, CalcResult } from '../../types';
 import { fmt } from '../../lib/format';
 
 export default function Maintenance({ data, update, calc }: { data: SimData; update: (p: Partial<SimData>) => void; calc: CalcResult }) {
   const items = data.maint.items;
+  const [comparisonYears, setComparisonYears] = useState(data.simYears === 30 ? 60 : data.simYears);
   const set = (values: MaintItem[]) => update({ maint: { items: values } });
   const patch = (id: string, values: Partial<MaintItem>) => set(items.map(i => i.id === id ? { ...i, ...values } : i));
-  const total = calc.rows.slice(0, data.simYears).reduce((a, r) => a + r.maintCost, 0);
-  const allTotal = calc.rows.reduce((a, r) => a + r.maintCost, 0);
+  const thirtyTotal = calc.rows.slice(0, 30).reduce((a, r) => a + r.maintCost, 0);
+  const total = calc.rows.slice(0, comparisonYears).reduce((a, r) => a + r.maintCost, 0);
   return <div className="plan-layout">
     <section className="plan-section">
-      <h2>住まいを維持するための予算</h2>
-      <div className="metric-grid">
-        <div className="metric"><span>{data.simYears}年間の修繕・設備更新</span><strong>{fmt(total)}<small>万円</small></strong></div>
-        <div className="metric"><span>月々の積立目安</span><strong>{fmt(total / data.simYears / 12, 2)}<small>万円/月</small></strong></div>
-        <div className="metric"><span>60年間の総額</span><strong>{fmt(allTotal)}<small>万円</small></strong></div>
+      <div className="section-heading"><h2>住まいを維持するための予算</h2>
+        <Field label="比較する期間"><Select value={comparisonYears} onChange={setComparisonYears} options={([40, 50, 60] as const).map(value => ({ value, label: value + '年間' }))} /></Field>
       </div>
-      <p className="plan-note">実際に支払う年の支出を合算。物価上昇率 {data.household.inflationRate}%/年を反映しています。30年目・60年目の支出も含め、総合まとめと同じ計算です。積立目安を残高から二重に引くことはありません。</p>
+      <div className="metric-grid">
+        <div className="metric"><span>30年間の修繕・設備更新 累計</span><strong>{fmt(thirtyTotal)}<small>万円</small></strong></div>
+        <div className="metric"><span>{comparisonYears}年間の修繕・設備更新 累計</span><strong>{fmt(total)}<small>万円</small></strong></div>
+        <div className="metric"><span>{comparisonYears}年間で備える月々の積立目安</span><strong>{fmt(total / comparisonYears / 12, 2)}<small>万円/月</small></strong></div>
+      </div>
+      <p className="plan-note">購入から各期間の年末までに支払う費用の合計です。30年目・{comparisonYears}年目の支出と、物価上昇率 {data.household.inflationRate}%/年を含みます。積立目安は比較期間の総額を月割りしたもので、手元資金から重ねて差し引きません。</p>
     </section>
     <section className="plan-section">
       <div className="section-heading"><h2>建物・設備のメンテナンス</h2><button className="action-button" onClick={() => set([...items, { id: crypto.randomUUID(), name: '', cycleYears: 10, cost: 0, enabled: true }])}><Plus size={16} />項目を追加</button></div>
@@ -31,9 +35,9 @@ export default function Maintenance({ data, update, calc }: { data: SimData; upd
       <p className="plan-note">費用・周期は仮予算です。メーカー仕様・保証条件・地域の施工見積で確認してください。</p>
     </section>
     <section className="plan-section">
-      <h2>修繕・更新の予定年</h2>
+      <h2>修繕・更新の予定年（{comparisonYears}年間）</h2>
       <div className="table-scroll"><table className="plan-table"><thead><tr><th>経過年</th><th>世帯主年齢</th><th>予定</th><th>その年の支出</th></tr></thead><tbody>
-        {calc.rows.slice(0, data.simYears).filter(r => r.maintCost > 0).map(r => <tr key={r.year}>
+        {calc.rows.slice(0, comparisonYears).filter(r => r.maintCost > 0).map(r => <tr key={r.year}>
           <th>{r.year}年後</th><td>{r.age}歳</td><td>{items.filter(i => i.enabled && i.cycleYears > 0 && r.year % Math.max(1, Math.round(i.cycleYears)) === 0).map(i => i.name).join(' / ')}</td><td>{fmt(r.maintCost, 1)}万円</td>
         </tr>)}
       </tbody></table></div>
