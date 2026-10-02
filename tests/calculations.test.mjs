@@ -11,6 +11,8 @@ const { DEFAULT_DATA } = await server.ssrLoadModule('/src/lib/defaults.ts');
 const { loanSchedule } = await server.ssrLoadModule('/src/lib/loans.ts');
 const { normalizeData } = await server.ssrLoadModule('/src/lib/data.ts');
 const { buildOverview, buildLifeStageExpenses, buildExpenseTotals, makeStressData } = await server.ssrLoadModule('/src/lib/planning.ts');
+const { buildBalanceTimeline, balanceAxis } = await server.ssrLoadModule('/src/lib/balanceTimeline.ts');
+const { default: BalanceTimeline } = await server.ssrLoadModule('/src/components/BalanceTimeline.tsx');
 const { occursInYear, expenseCategory } = await server.ssrLoadModule('/src/lib/suddenExpenses.ts');
 const { default: PrintProposal } = await server.ssrLoadModule('/src/components/PrintProposal.tsx');
 const { default: HousingPlan } = await server.ssrLoadModule('/src/components/tabs/HousingPlan.tsx');
@@ -459,6 +461,78 @@ test('summary omits the first-year budget section while retaining the remaining 
     assert.ok(html.includes(c.rows[years - 1].balance.toLocaleString('ja-JP', { maximumFractionDigits: 0 })));
     assert.equal(JSON.stringify(c), original);
   }
+});
+
+test('balance timeline uses the same full sixty-year ledger and year-end ages without mutation', () => {
+  const d = fresh(), c = calcAll(d), original = JSON.stringify({ d, c });
+  const chart = buildBalanceTimeline(d, c);
+  assert.equal(chart.points.length, 61);
+  near(chart.first.balance, c.initialCash); assert.equal(chart.first.age, d.basic.age);
+  for (let year = 1; year <= 60; year++) {
+    const point = chart.points[year], row = c.rows[year - 1];
+    assert.equal(point.age, row.age); near(point.balance, row.balance); assert.equal(point.row, row);
+  }
+  assert.equal(chart.last.age, d.basic.age + 60);
+  assert.equal(JSON.stringify({ d, c }), original);
+  d.simYears = 50; assert.deepEqual(buildBalanceTimeline(d, calcAll(d)), chart);
+});
+
+test('retirement marker uses the retirement-year balance, not the following retired year', () => {
+  const d = fresh(); Object.assign(d.basic, { age: 64, retireAge: 65, retireBonus: 100 });
+  const c = calcAll(d), chart = buildBalanceTimeline(d, c), marker = chart.milestones.find(m => m.key === 'retirement');
+  assert.equal(chart.retirementYear, 1); assert.equal(marker.point.age, 65);
+  near(marker.point.balance, c.rows[0].balance); near(marker.point.row.retBonus, 100);
+  assert.ok(marker.point.row.events.includes('世帯主退職'));
+});
+
+test('retirement outside the chart never fabricates a historical or future balance', () => {
+  const d = fresh(); d.basic.age = 70;
+  let chart = buildBalanceTimeline(d, calcAll(d));
+  assert.equal(chart.milestones[1].point, null); assert.equal(chart.milestones[1].note, '退職済み');
+  d.basic.age = 20; d.basic.retireAge = 85;
+  chart = buildBalanceTimeline(d, calcAll(d));
+  assert.equal(chart.milestones[1].point, null); assert.match(chart.milestones[1].note, /表示期間外/);
+  d.basic.retireAge = 80;
+  chart = buildBalanceTimeline(d, calcAll(d));
+  assert.equal(chart.milestones[1].point.year, 60);
+});
+
+test('payoff marker reflects early repayment and is absent when there is no mortgage or no payoff', () => {
+  const d = fresh(); Object.assign(d.loan, { pyear: 1, pamount: 100000 });
+  const c = calcAll(d), chart = buildBalanceTimeline(d, c);
+  assert.equal(chart.milestones[2].point.year, 1); near(chart.milestones[2].point.balance, c.rows[0].balance);
+  d.housing.down = 100000;
+  const noLoan = buildBalanceTimeline(d, calcAll(d));
+  assert.equal(noLoan.milestones[2].point, null); assert.equal(noLoan.milestones[2].note, '借入なし');
+  const unpaid = { ...c, rows: c.rows.map(r => ({ ...r, loanBalance: 100 })) };
+  assert.equal(buildBalanceTimeline(d, unpaid).milestones[2].point, null);
+});
+
+test('balance axis contains zero and every amount with finite distinct ticks', () => {
+  for (const amounts of [[0], [500, 500], [-500, -500], [-100, 200], [0.001, -0.001], [1e12, -1e11]]) {
+    const axis = balanceAxis(amounts);
+    assert.ok(axis.min <= Math.min(0, ...amounts)); assert.ok(axis.max >= Math.max(0, ...amounts));
+    assert.ok(axis.max > axis.min); assert.ok(axis.ticks.includes(0));
+    assert.equal(new Set(axis.ticks).size, axis.ticks.length);
+    assert.ok(axis.ticks.every(Number.isFinite));
+  }
+});
+
+test('balance timeline exposes key ages and balances without interaction and retains real negatives', () => {
+  const d = fresh(); d.household.food = 100;
+  const c = calcAll(d), chart = buildBalanceTimeline(d, c);
+  const html = renderToStaticMarkup(createElement(BalanceTimeline, { data: d, calc: c }));
+  for (const marker of chart.milestones) {
+    assert.ok(html.includes(marker.label));
+    if (marker.point) {
+      assert.ok(html.includes(`${marker.point.age}歳`));
+      assert.ok(html.includes(marker.point.balance.toLocaleString('ja-JP', { maximumFractionDigits: 0 })));
+    }
+  }
+  assert.ok(html.includes('type="range"')); assert.ok(html.includes('確認する年齢'));
+  assert.ok(html.includes('class="negative"')); assert.ok(!html.includes('NaN'));
+  const proposal = renderToStaticMarkup(createElement(PrintProposal, { data: d, calc: c }));
+  assert.ok(!proposal.includes('balance-timeline')); assert.ok(proposal.includes('balance-plot'));
 });
 
 test('legacy comparison settings and review checkboxes do not affect the new overview', () => {

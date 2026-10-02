@@ -3,7 +3,8 @@ import { Download, Printer, FileDown } from 'lucide-react';
 import type { SimData, CalcResult } from '../../types';
 import { fmt } from '../../lib/format';
 import { buildOverview } from '../../lib/planning';
-import { HorizonTable, MoneyBridge, AnnualTable, BalancePlot, LifeStageExpenses } from '../PlanResults';
+import { HorizonTable, MoneyBridge, AnnualTable, LifeStageExpenses } from '../PlanResults';
+import BalanceTimeline from '../BalanceTimeline';
 
 export function downloadText(name: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -46,8 +47,8 @@ export default function Summary({ data, calc, onPrint, onExport }: {
       <p className="plan-note">手元資金は預貯金として残る金額の試算。自宅の売却価値・未受取の保険積立・運用益は含みません。マイナスは資金不足額で、追加融資や利息は自動計上しません。生活防衛資金は初年度の月平均支払い・積立額を基準とした目安で、別途支出はしません。</p>
     </section>
     <section className="plan-section"><h2>30・40・50・60年後の見通し</h2><HorizonTable overview={view} /></section>
-    <section className="plan-section"><h2>手元資金の推移</h2><BalancePlot calc={calc} />
-      <p className="plan-note">年齢は各年の終了時点。1年目から60年目末までを計算し、30年目末などの修繕・買い替えも含みます。年末残高がプラスでも、年内の大きな支払いに備えた別途の資金繰り確認が必要です。</p>
+    <section className="plan-section"><h2>手元資金の推移</h2><BalanceTimeline data={data} calc={calc} />
+      <p className="plan-note">購入直後と各年末の預貯金残高です。住宅ローン・生活費・教育費・税金・旅行・車・修繕などの支払いを反映しています。退職の区切りは世帯主、ローン完済時の金額は完済した年の年末です。マイナスは資金不足額です。年内の大きな支払いには別途の資金繰り確認が必要です。</p>
     </section>
     <section className="plan-section"><h2>現役中・退職後の支出</h2><LifeStageExpenses overview={view} /></section>
     <section className="plan-section"><h2>最後に残るお金の計算</h2><MoneyBridge calc={calc} years={data.simYears} />
